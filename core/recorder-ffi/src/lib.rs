@@ -204,6 +204,9 @@ pub unsafe extern "C" fn recorder_command_json(text: *const c_char) -> *mut c_ch
                     return json!({"ok":false,"error":"Webcam visibility must be boolean"});
                 };
                 worker.webcam_visible.store(enabled, Ordering::Release);
+                if let Ok(mut status) = worker.status.lock() {
+                    status["webcam_visible"] = json!(enabled);
+                }
                 json!({"ok":true})
             }
             "clear_layers" => match layers::clear() {

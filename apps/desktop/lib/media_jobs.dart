@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'export_presets.dart';
 
 /// Optional local export tools. Capture continues to use the Rust FFmpeg library.
 /// Arguments are passed directly to the executable; no shell is involved.
@@ -51,8 +52,16 @@ class MediaJobs extends ChangeNotifier {
     double start = 0,
     double? duration,
     List<int>? crop,
+    ExportPreset preset = ExportPreset.original,
+    ExportAudio audio = ExportAudio.all,
   }) async {
     if (busy) throw StateError('Another media job is running');
+    if (!['remux', 'trim', 'crop', 'preset'].contains(mode)) {
+      throw ArgumentError('Unknown export operation');
+    }
+    if (mode == 'remux' && (crop != null || preset != ExportPreset.original)) {
+      throw ArgumentError('Choose re-encode to resize or crop');
+    }
     if (!await File(input).exists()) {
       throw StateError('Input recording is missing');
     }
@@ -78,16 +87,22 @@ class MediaJobs extends ChangeNotifier {
     if (busy || _disposed) {
       throw StateError('Media tools are unavailable or busy');
     }
-    final total =
-        duration ??
-        (double.tryParse('${(metadata['format'] as Map?)?['duration']}') ?? 0);
+    final sourceDuration =
+        double.tryParse('${(metadata['format'] as Map?)?['duration']}') ?? 0;
+    if (sourceDuration > 0 && start >= sourceDuration) {
+      throw ArgumentError('Start must be before the end of the recording');
+    }
+    final remaining = (sourceDuration - start).clamp(0.0, double.infinity);
+    final total = duration == null
+        ? remaining
+        : (remaining > 0 ? duration.clamp(0.0, remaining) : duration);
     final video = (metadata['streams'] as List)
         .whereType<Map>()
         .where((s) => s['codec_type'] == 'video')
         .firstOrNull;
+    if (video == null) throw ArgumentError('Recording has no video track');
     if (crop != null &&
-        (video == null ||
-            crop[0] + crop[2] > (video['width'] as int) ||
+        (crop[0] + crop[2] > (video['width'] as int) ||
             crop[1] + crop[3] > (video['height'] as int))) {
       throw ArgumentError('Crop must fit the video');
     }
@@ -95,33 +110,52 @@ class MediaJobs extends ChangeNotifier {
       '-hide_banner',
       '-nostats',
       '-n',
+      '-filter_threads',
+      '2',
       '-protocol_whitelist',
       'file,pipe',
     ];
     if (start > 0) args.addAll(['-ss', '$start']);
-    args.addAll(['-i', input]);
+    args.addAll(['-threads', '2', '-i', input]);
     if (duration != null) args.addAll(['-t', '$duration']);
-    args.addAll(['-map', '0:v:0', '-map', '0:a?']);
+    args.addAll(['-map', '0:v:0']);
+    switch (audio) {
+      case ExportAudio.all:
+        args.addAll(['-map', '0:a?']);
+      case ExportAudio.first:
+        args.addAll(['-map', '0:a:0?']);
+      case ExportAudio.muted:
+        args.add('-an');
+    }
     if (mode == 'remux') {
       args.addAll(['-c', 'copy']);
     } else {
-      if (crop != null) {
-        args.addAll([
-          '-vf',
-          'crop=${crop[2]}:${crop[3]}:${crop[0]}:${crop[1]}',
-        ]);
-      }
+      final rate = '${video['avg_frame_rate']}'.split('/');
+      final numerator = double.tryParse(rate.first);
+      final denominator = rate.length == 2 ? double.tryParse(rate.last) : 1.0;
+      final fps = numerator != null && denominator != null && denominator > 0
+          ? numerator / denominator
+          : null;
+      final filters = [
+        if (crop != null) 'crop=${crop[2]}:${crop[3]}:${crop[0]}:${crop[1]}',
+        ...preset.filters(fps),
+      ];
+      args.addAll(['-vf', filters.join(',')]);
       args.addAll([
         '-c:v',
         'libx264',
         '-preset',
         'veryfast',
         '-crf',
-        '20',
+        '${preset.crf}',
+        '-pix_fmt',
+        'yuv420p',
         '-threads',
         '2',
         '-c:a',
         'aac',
+        '-b:a',
+        '128k',
       ]);
     }
     if (output.toLowerCase().endsWith('.mp4')) {

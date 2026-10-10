@@ -6,7 +6,7 @@ is still in progress; see [release status](docs/release-status.md) for exact gap
 
 ## Run the local Windows build
 
-Open the latest build at `artifacts/Frame-Windows-Creator/Frame.exe`. Keep the entire folder together: Flutter
+Open the latest build at `artifacts/Frame-Windows-ExportPresets/Frame.exe`. Keep the entire folder together: Flutter
 assets, recorder_core.dll and the matching FFmpeg runtime DLLs are required.
 Choose a display, window or display region, choose a new output file, then record.
 The main workspace shows a live thumbnail preview. Open **Settings** for video,
@@ -23,6 +23,8 @@ See [webcam setup](docs/webcam.md) for camera overlays and green-screen removal.
 See [window capture and Follow mouse](docs/capture.md) for full-window previews and moving region capture.
 See [creator overlays](docs/creator-overlays.md) for Sinhala/Unicode titles, logos,
 saved layouts and the optional keyboard-shortcut display.
+See [local exports](docs/exports.md) for landscape, vertical, square and small-file
+MP4 presets, audio-track selection and trim/crop combinations.
 
 ## Current features
 
@@ -43,8 +45,12 @@ saved layouts and the optional keyboard-shortcut display.
   microphone noise suppression/gate and limiter.
 - Duration/file-size auto-stop, optional finalized MKV recovery segments.
 - Encoded replay buffer with an explicit memory budget and MKV replay export.
+- Local share/compression presets, aspect-ratio padding, 30 fps caps and export
+  audio selection; source files are preserved and video threading is bounded.
 - Webcam overlay with camera selection, four-corner placement, size, mirror
-  and adjustable green-background removal (software H.264; no webcam thumbnail).
+  and adjustable green-background removal (software H.264). Live webcam preview
+  updates at 5 fps, or 2 fps in Low resource; the main-screen On/Off button can
+  hide/show the overlay in a recording started with webcam enabled.
 - Draw/arrow/box/spotlight annotations; display/region cursor highlight/click effects.
   These effects use software encoding and are off by default.
 - Up to four Unicode text/logo layers, preview placement, opacity/order controls,
@@ -73,7 +79,7 @@ See [build instructions](docs/build.md). On the prepared local workspace:
 ```
 
 Packaging defaults to `artifacts/Frame-Windows`. To recreate the feature build
-alongside an open app, use `./tools/package-windows.ps1 -BundleName Frame-Windows-Creator`.
+alongside an open app, use `./tools/package-windows.ps1 -BundleName Frame-Windows-ExportPresets`.
 
 The original [architecture plan](docs/architecture.md) explains the target
 monorepo, media ownership and future platform integrations. The current code adds

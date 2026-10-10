@@ -159,7 +159,11 @@ class _CreatorSmokeState extends State<CreatorSmoke> {
       );
     } finally {
       if (native != null) {
-        native.command({'action': 'stop'});
+        try {
+          native.command({'action': 'stop'});
+        } catch (_) {
+          // Auto-stop may already have finished its worker before this poll.
+        }
         final deadline = DateTime.now().add(const Duration(seconds: 10));
         while ([
               'preparing',

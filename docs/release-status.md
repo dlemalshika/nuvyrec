@@ -33,6 +33,9 @@ OBS/Bandicam competitor requested in the original specification.
   duration/file-size auto-stop.
 - Recording library, explicit import, default-player playback, folder reveal,
   full-resolution PNG screenshots, local MP4 remux, precise trim and crop exports.
+- Local landscape, vertical, square and small-file export presets with aspect-ratio
+  preservation, frame-rate caps, audio-track selection and bounded video threads.
+  See [local exports](exports.md).
 - Encoded-packet replay history (5–120 seconds via ABI; UI 15/30/60/120),
   4–128 MiB payload budget and 32,768-packet cap. Metadata adds a small bounded
   overhead. Replay saves independent keyframe-aligned MKV files.
@@ -53,6 +56,9 @@ OBS/Bandicam competitor requested in the original specification.
 
 - Windows DirectShow webcam worker and YUV420P compositor with mirror, corner/size
   placement and soft green key; latest-frame buffering and camera-error telemetry.
+- Live camera preview (5 fps / Low resource 2 fps), shared camera reader,
+  bounded binary thumbnails and a main-screen Webcam On/Off control. Takes
+  started with webcam enabled allow live overlay hide/show, including while paused.
 - Four cached Unicode title/logo layers, position/size/opacity/order controls,
   and twenty saved creator layouts. Local image files are reloaded on restore.
 - Opt-in shortcut display with bounded expiry, global modifier combinations and
@@ -63,9 +69,16 @@ OBS/Bandicam competitor requested in the original specification.
 
 ## Verified on this machine
 
+- ExportPresets revision: nineteen Flutter tests and analysis passed. Synthetic
+  videos exported with all four share presets and decoded successfully; output
+  dimensions, high/low frame rates, black padding, no upscaling, audio selection,
+  crop/trim and overwrite refusal checked. Both themes fit at 960 × 640.
 - Rust compilation, Clippy and configuration/lifecycle regression tests.
-- 26 Rust tests and fourteen Flutter tests passed for the Creator revision;
+- 28 Rust tests and seventeen Flutter tests passed for the WebcamPreview revision;
   Clippy with warnings denied and Flutter analysis passed.
+- Real webcam preview and owned-window recording shared one reader; 24 preview
+  frames and live overlay hide/show verified, with full recorded-video decoding.
+  Widget tests cover image refresh, stale-frame disposal, errors and suspension.
 - Owned static Flutter window recorded 73–74 frames at 640 × 360 / 24 fps and
   automatically finalized. Encoded Sinhala glyph pixels matched the uploaded
   native Flutter raster; transparent logo/background and full decode verified.

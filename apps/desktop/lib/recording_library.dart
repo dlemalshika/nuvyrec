@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'controller.dart';
 import 'media_jobs.dart';
+import 'export_presets.dart';
 
 Future<void> showRecordingLibrary(
   BuildContext context,
@@ -151,6 +152,10 @@ Future<void> showExportDialog(
   MediaJobs jobs,
 ) async {
   String mode = 'remux';
+  ExportPreset preset = ExportPreset.original;
+  ExportAudio audio = ExportAudio.all;
+  String? validationError;
+  bool choosingOutput = false;
   final start = TextEditingController(text: '0'),
       duration = TextEditingController();
   final crop = List.generate(
@@ -171,6 +176,7 @@ Future<void> showExportDialog(
                 children: [
                   DropdownButtonFormField<String>(
                     initialValue: mode,
+                    isExpanded: true,
                     decoration: const InputDecoration(
                       labelText: 'Export operation',
                     ),
@@ -187,10 +193,48 @@ Future<void> showExportDialog(
                         value: 'crop',
                         child: Text('Crop and trim'),
                       ),
+                      DropdownMenuItem(
+                        value: 'preset',
+                        child: Text('Share / compress'),
+                      ),
                     ],
-                    onChanged: (value) => update(() => mode = value!),
+                    onChanged: choosingOutput
+                        ? null
+                        : (value) => update(() {
+                            mode = value!;
+                            validationError = null;
+                            if (mode == 'preset') {
+                              preset = ExportPreset.youtube;
+                              audio = ExportAudio.first;
+                            } else {
+                              preset = ExportPreset.original;
+                              audio = ExportAudio.all;
+                            }
+                          }),
                   ),
                   if (mode != 'remux') ...[
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<ExportPreset>(
+                      key: ValueKey('preset-$mode'),
+                      initialValue: preset,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Export preset',
+                      ),
+                      items: ExportPreset.values
+                          .map(
+                            (p) => DropdownMenuItem(
+                              value: p,
+                              child: Text(p.label),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: choosingOutput
+                          ? null
+                          : (p) => update(() => preset = p!),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(preset.description),
                     const SizedBox(height: 16),
                     TextField(
                       controller: start,
@@ -229,9 +273,44 @@ Future<void> showExportDialog(
                       ),
                   ],
                   const SizedBox(height: 16),
-                  const Text(
-                    'Exports run locally. Trimming/cropping re-encodes with two CPU threads.',
+                  DropdownButtonFormField<ExportAudio>(
+                    key: ValueKey('audio-$mode'),
+                    initialValue: audio,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Export audio',
+                    ),
+                    items: ExportAudio.values
+                        .map(
+                          (a) =>
+                              DropdownMenuItem(value: a, child: Text(a.label)),
+                        )
+                        .toList(),
+                    onChanged: choosingOutput
+                        ? null
+                        : (a) => update(() => audio = a!),
                   ),
+                  if (audio == ExportAudio.first)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text(
+                        'Uses the first recorded audio track. Separate system/mic tracks are not mixed during export.',
+                      ),
+                    ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Local MP4 export • H.264 / AAC • bounded video threads. Your source file is kept.',
+                  ),
+                  if (validationError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Text(
+                        validationError!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -242,42 +321,78 @@ Future<void> showExportDialog(
               child: const Text('Cancel'),
             ),
             FilledButton(
-              onPressed: () async {
-                try {
-                  if (!await File(input).exists()) {
-                    throw StateError('Recording file is missing');
-                  }
-                  final output = await RecorderController.host
-                      .invokeMethod<String>('chooseOutput', {'format': 'mp4'});
-                  if (output == null) return;
-                  final from = double.tryParse(start.text);
-                  final seconds = duration.text.trim().isEmpty
-                      ? null
-                      : double.tryParse(duration.text);
-                  if (from == null ||
-                      (duration.text.trim().isNotEmpty && seconds == null)) {
-                    throw ArgumentError('Enter valid trim times');
-                  }
-                  final area = mode == 'crop'
-                      ? crop.map((c) => int.tryParse(c.text)).toList()
-                      : null;
-                  if (area != null && area.any((v) => v == null)) {
-                    throw ArgumentError('Enter all crop values');
-                  }
-                  if (context.mounted) Navigator.pop(context);
-                  await jobs.export(
-                    input,
-                    output,
-                    mode: mode,
-                    start: mode == 'remux' ? 0 : from,
-                    duration: mode == 'remux' ? null : seconds,
-                    crop: area?.cast<int>(),
-                  );
-                } catch (error) {
-                  jobs.status = error.toString();
-                  jobs.notifyJobChanged();
-                }
-              },
+              onPressed: choosingOutput
+                  ? null
+                  : () async {
+                      update(() {
+                        choosingOutput = true;
+                        validationError = null;
+                      });
+                      try {
+                        if (!await File(input).exists()) {
+                          throw StateError('Recording file is missing');
+                        }
+                        if (!context.mounted) return;
+                        final from = double.tryParse(start.text);
+                        final seconds = duration.text.trim().isEmpty
+                            ? null
+                            : double.tryParse(duration.text);
+                        if (mode != 'remux' &&
+                            (from == null ||
+                                !from.isFinite ||
+                                from < 0 ||
+                                (duration.text.trim().isNotEmpty &&
+                                    (seconds == null ||
+                                        !seconds.isFinite ||
+                                        seconds <= 0)))) {
+                          throw ArgumentError('Enter valid trim times');
+                        }
+                        final area = mode == 'crop'
+                            ? crop.map((c) => int.tryParse(c.text)).toList()
+                            : null;
+                        if (area != null &&
+                            (area.any((v) => v == null) ||
+                                area[0]! < 0 ||
+                                area[1]! < 0 ||
+                                area[2]! < 2 ||
+                                area[3]! < 2 ||
+                                area[2]! % 2 != 0 ||
+                                area[3]! % 2 != 0)) {
+                          throw ArgumentError(
+                            'Crop needs non-negative offsets and even dimensions of at least 2',
+                          );
+                        }
+                        final selectedMode = mode,
+                            selectedPreset = preset,
+                            selectedAudio = audio;
+                        final output = await RecorderController.host
+                            .invokeMethod<String>('chooseOutput', {
+                              'format': 'mp4',
+                            });
+                        if (output == null || !context.mounted) return;
+                        Navigator.pop(context);
+                        await jobs.export(
+                          input,
+                          output,
+                          mode: selectedMode,
+                          preset: selectedPreset,
+                          audio: selectedAudio,
+                          start: selectedMode == 'remux' ? 0 : from!,
+                          duration: selectedMode == 'remux' ? null : seconds,
+                          crop: area?.cast<int>(),
+                        );
+                      } catch (error) {
+                        if (context.mounted) {
+                          update(() => validationError = error.toString());
+                        }
+                        jobs.status = error.toString();
+                        jobs.notifyJobChanged();
+                      } finally {
+                        if (context.mounted) {
+                          update(() => choosingOutput = false);
+                        }
+                      }
+                    },
               child: const Text('Export'),
             ),
           ],

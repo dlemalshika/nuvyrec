@@ -12,6 +12,7 @@ Priorities are recommendations for Frame's lightweight recorder focus.
 | Audio endpoints, gain/mute, meters, mix | Implemented; actual three-track capture and DSP verified |
 | Quality presets, schedules, auto-stop | Implemented; schedules require Frame open; duration stop verified |
 | Library, screenshots, remux, trim/crop | Implemented; synthetic export/probe/decode tests passed |
+| Share/export presets | Implemented; landscape, vertical, square, small-file MP4; audio-track selection and bounded video threading |
 | Replay history | Implemented; bounded encoded-packet history, MKV save, keyframe/timestamp tests |
 | Recovery segmentation | Implemented for MKV; finalized parts retained; current part not guaranteed |
 | Drawing/arrows/boxes/spotlight | Implemented in preview and recorded CPU compositor; Unicode titles prepared before recording |

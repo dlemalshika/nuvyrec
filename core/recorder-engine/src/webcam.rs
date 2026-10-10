@@ -7,7 +7,7 @@ use std::{
     ffi::{CStr, CString},
     ptr,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex, OnceLock, Weak,
     },
     thread,
@@ -86,7 +86,7 @@ pub struct Camera {
 /// The last lease requests shutdown; a stuck driver retains only its one worker.
 struct CameraLife {
     device: String,
-    max_width: usize,
+    max_width: Arc<AtomicUsize>,
     latest: Arc<Mutex<Option<Image>>>,
     error: Arc<Mutex<Option<String>>>,
     stop: Arc<AtomicBool>,
@@ -102,9 +102,12 @@ impl Camera {
             .lock()
             .map_err(|_| Error::State("camera lease lock failed"))?;
         if let Some(life) = shared.upgrade() {
-            if life.device != device || life.max_width != max_width {
+            if life.device != device {
                 return Err(Error::State("camera settings are changing; retry shortly"));
             }
+            // Quality-mode changes update conversion size on the existing
+            // reader; no device restart or preview-to-recording race.
+            life.max_width.store(max_width, Ordering::Release);
             return Ok(Self {
                 latest: life.latest.clone(),
                 error: life.error.clone(),
@@ -125,11 +128,13 @@ impl Camera {
         let stop = Arc::new(AtomicBool::new(false));
         let (image, failure, cancel) = (latest.clone(), error.clone(), stop.clone());
         let reader_device = device.clone();
+        let max_width = Arc::new(AtomicUsize::new(max_width));
+        let reader_width = max_width.clone();
         let thread = thread::Builder::new()
             .name("frame-camera".into())
             .spawn(move || {
                 let _lease = lease;
-                if let Err(e) = read_camera(&reader_device, max_width, cancel, image) {
+                if let Err(e) = read_camera(&reader_device, reader_width, cancel, image) {
                     if let Ok(mut value) = failure.lock() {
                         *value = Some(e.to_string());
                     }
@@ -197,7 +202,7 @@ impl Drop for Input {
 }
 fn read_camera(
     device: &str,
-    max_width: usize,
+    max_width: Arc<AtomicUsize>,
     stop: Arc<AtomicBool>,
     latest: Arc<Mutex<Option<Image>>>,
 ) -> Result<()> {
@@ -305,7 +310,7 @@ fn read_camera(
                         ));
                     }
                     if last.elapsed() >= Duration::from_millis(67) {
-                        let ratio = (max_width as f64 / frame.width as f64)
+                        let ratio = (max_width.load(Ordering::Acquire) as f64 / frame.width as f64)
                             .min(480.0 / frame.height as f64)
                             .min(1.0);
                         let w = ((frame.width as f64 * ratio) as usize / 2 * 2).max(2);
@@ -582,28 +587,48 @@ mod tests {
     #[test]
     fn preview_is_bounded_mirrored_and_premultiplied_with_key() {
         let image = fixture();
-        let (w,h,pixels) = image.preview_rgba(&placement(true,false)).unwrap();
-        assert_eq!((w,h), (4,2));
-        assert_eq!(&pixels[..4], &[0,0,0,0]);
-        assert_eq!(&pixels[8..12], &[255,0,0,255]);
-        let (_,_,mirrored) = image.preview_rgba(&placement(true,true)).unwrap();
-        assert_eq!(&mirrored[..4], &[255,0,0,255]);
-        let large = Image { width:640,height:480,bgra:vec![255;640*480*4],captured:Instant::now() };
-        let (w,h,rgba) = large.preview_rgba(&placement(false,false)).unwrap();
-        assert_eq!((w,h,rgba.len()),(320,240,320*240*4));
+        let (w, h, pixels) = image.preview_rgba(&placement(true, false)).unwrap();
+        assert_eq!((w, h), (4, 2));
+        assert_eq!(&pixels[..4], &[0, 0, 0, 0]);
+        assert_eq!(&pixels[8..12], &[255, 0, 0, 255]);
+        let (_, _, mirrored) = image.preview_rgba(&placement(true, true)).unwrap();
+        assert_eq!(&mirrored[..4], &[255, 0, 0, 255]);
+        let large = Image {
+            width: 640,
+            height: 480,
+            bgra: vec![255; 640 * 480 * 4],
+            captured: Instant::now(),
+        };
+        let (w, h, rgba) = large.preview_rgba(&placement(false, false)).unwrap();
+        assert_eq!((w, h, rgba.len()), (320, 240, 320 * 240 * 4));
     }
     #[test]
     fn preview_and_recording_share_one_reader_until_final_lease() {
         // Inject an owned image, not a physical device. This exercises real
         // lease selection/shutdown without camera permissions or a driver.
         let stop = Arc::new(AtomicBool::new(false));
-        let life = Arc::new(CameraLife { device:"fixture-camera".into(),max_width:320,latest:Arc::new(Mutex::new(Some(fixture()))),error:Arc::new(Mutex::new(None)),stop:stop.clone(),thread:Mutex::new(None) });
-        *SHARED_CAMERA.get_or_init(|| Mutex::new(Weak::new())).lock().unwrap() = Arc::downgrade(&life);
-        let preview = Camera::start("fixture-camera".into(),320).unwrap();
-        let recording = Camera::start("fixture-camera".into(),320).unwrap();
-        assert!(Arc::ptr_eq(&preview.latest,&recording.latest));
-        assert!(Camera::start("different-camera".into(),320).is_err());
-        drop(life); drop(preview);
+        let life = Arc::new(CameraLife {
+            device: "fixture-camera".into(),
+            max_width: Arc::new(AtomicUsize::new(320)),
+            latest: Arc::new(Mutex::new(Some(fixture()))),
+            error: Arc::new(Mutex::new(None)),
+            stop: stop.clone(),
+            thread: Mutex::new(None),
+        });
+        *SHARED_CAMERA
+            .get_or_init(|| Mutex::new(Weak::new()))
+            .lock()
+            .unwrap() = Arc::downgrade(&life);
+        let preview = Camera::start("fixture-camera".into(), 320).unwrap();
+        let recording = Camera::start("fixture-camera".into(), 320).unwrap();
+        assert!(Arc::ptr_eq(&preview.latest, &recording.latest));
+        let higher_quality = Camera::start("fixture-camera".into(), 640).unwrap();
+        assert_eq!(life.max_width.load(Ordering::Acquire), 640);
+        assert!(Arc::ptr_eq(&higher_quality.latest, &preview.latest));
+        drop(higher_quality);
+        assert!(Camera::start("different-camera".into(), 320).is_err());
+        drop(life);
+        drop(preview);
         assert!(!stop.load(Ordering::Acquire));
         drop(recording);
         assert!(stop.load(Ordering::Acquire));

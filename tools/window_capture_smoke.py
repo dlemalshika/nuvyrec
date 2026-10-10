@@ -18,6 +18,7 @@ import uuid
 parser = argparse.ArgumentParser()
 parser.add_argument('--library', type=Path, required=True)
 parser.add_argument('--pan-probe', type=Path, required=True)
+parser.add_argument('--webcam-preview', action='store_true', help='Opt-in real camera: verify shared preview/recording and live overlay hide/show; no thumbnail is saved or displayed')
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 sdk = root / '.deps/ffmpeg/ffmpeg-8.1.2-full_build-shared/bin'
@@ -106,8 +107,24 @@ def read(pointer):
     assert pointer
     try: return json.loads(c.string_at(pointer).decode())
     finally: library.recorder_string_free(pointer)
-def command(action,config=None):
-    return read(library.recorder_command_json(json.dumps({'action':action,**({'config':config} if config else {})}).encode()))
+def command(action,config=None,**extra):
+    return read(library.recorder_command_json(json.dumps({'action':action,**({'config':config} if config else {}),**extra}).encode()))
+
+preview_frames=0
+camera_request=None
+def camera_frame():
+    global preview_frames
+    size=c.c_size_t();width=c.c_uint32();height=c.c_uint32()
+    pointer=library.recorder_webcam_preview_rgba(c.byref(size),c.byref(width),c.byref(height))
+    if not pointer:return False
+    try:
+        assert 0<width.value<=320 and 0<height.value<=240
+        assert size.value==width.value*height.value*4
+        preview_frames+=1
+        # Validate the binary ownership contract without storing or showing pixels.
+        assert len(c.string_at(pointer,size.value))==size.value
+    finally:library.recorder_preview_free(pointer,size.value)
+    return True
 directory=root/'artifacts'/('window-fixture-'+uuid.uuid4().hex)
 directory.mkdir()
 def rgb(path):
@@ -121,12 +138,38 @@ try:
     assert not source['minimized'] and source['width']>=640 and source['height']>360
     config=dict(output=str(directory/'full-window.mkv'),container='mkv',source_kind='window',source_id=source['id'],
                 width=source['width']//2*2,height=source['height']//2*2,fps=30,bitrate=2_000_000,encoder='libx264')
+    if args.webcam_preview:
+        library.recorder_cameras_json.restype=c.c_void_p
+        library.recorder_webcam_preview_request_json.argtypes=[c.c_char_p];library.recorder_webcam_preview_request_json.restype=c.c_void_p
+        library.recorder_webcam_preview_rgba.argtypes=[c.POINTER(c.c_size_t),c.POINTER(c.c_uint32),c.POINTER(c.c_uint32)];library.recorder_webcam_preview_rgba.restype=c.c_void_p
+        cameras=read(library.recorder_cameras_json());assert cameras['ok'] and cameras['devices'],'No camera available for opt-in integration test'
+        webcam=dict(enabled=True,device=cameras['devices'][0]['id'],x=.5,y=.1,width=.12,mirror=True,key=False,similarity=.15,softness=.08)
+        camera_request=dict(webcam=webcam,low_resource=True)
+        response=read(library.recorder_webcam_preview_request_json(json.dumps(camera_request).encode()));assert response['ok'],response
+        deadline=time.monotonic()+12
+        while time.monotonic()<deadline:
+            response=read(library.recorder_webcam_preview_request_json(json.dumps(camera_request).encode()));assert response['ok'] and not response.get('error'),response
+            if camera_frame():break
+            time.sleep(.2)
+        else:raise RuntimeError('Real webcam preview did not arrive')
+        config.update(webcam=webcam,performance_mode='eco')
     response=command('start',config);assert response['ok'],response
+    hidden=shown=False
     deadline=time.monotonic()+12
     while time.monotonic()<deadline:
         status=read(library.recorder_status_json())
         if status['state']=='failed':raise RuntimeError(status['error'])
-        if status['state']=='recording' and status['seconds']>1:break
+        if args.webcam_preview and status['state']=='recording':
+            assert not status.get('webcam_error'),status.get('webcam_error')
+            camera_frame()
+            if status['seconds']>.4 and not hidden:
+                assert command('webcam_visible',enabled=False)['ok'];hidden=True
+            if status['seconds']>1 and hidden and not shown:
+                assert command('webcam_visible',enabled=True)['ok'];shown=True
+            if status['seconds']>2.2:
+                assert hidden and shown and preview_frames>=5 and status['webcam_ready'] and status['webcam_visible'],status
+                break
+        elif status['state']=='recording' and status['seconds']>1:break
         time.sleep(.1)
     else:raise RuntimeError('Owned window did not record')
     assert command('stop')['ok']
@@ -165,8 +208,12 @@ try:
     subprocess.run([str(args.pan_probe.resolve()),str(fixture['hwnd']),str(directory)],check=True)
     assert is_red(rgb(directory/'pan-left.png')(80,80)),'Left GPU crop incorrect'
     assert is_blue(rgb(directory/'pan-right.png')(80,80)),'Live GPU panning did not change the crop'
-    print(json.dumps({'result':'passed','full_window':True,'native_preview':True,'minimized_rejected':True,'same_graph_pan':True,'fixture_artifacts':str(directory)}))
+    if args.webcam_preview:
+        subprocess.run([str(sdk/'ffmpeg.exe'),'-v','error','-i',str(directory/'full-window.mkv'),'-f','null','-'],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+    print(json.dumps({'result':'passed','full_window':True,'native_preview':True,'minimized_rejected':True,'same_graph_pan':True,'webcam_preview_frames':preview_frames,'webcam_hide_show':hidden and shown,'fixture_artifacts':str(directory)}))
 finally:
     command('stop')
+    if camera_request is not None:
+        read(library.recorder_webcam_preview_request_json(json.dumps(dict(webcam=dict(enabled=False),low_resource=True)).encode()))
     user.PostMessageW(fixture['hwnd'],0x0010,0,0)
     thread.join(3)

@@ -16,9 +16,24 @@ continue to use the selected WASAPI endpoints.
 5. Choose a new MKV, MP4 or AVI output and start recording. Recording health
    reports whether camera frames are arriving and displays any camera error.
 
-Settings persist per user and lock during recording. GIF disables the webcam.
-The current webcam is composited into the saved video; the lightweight screen
-thumbnail does not display the final camera composite. It is not a camera preview.
+The main screen's **Webcam On/Off** button enables/disables the overlay without
+opening Settings. If no device is selected, it discovers cameras and selects the
+first available one; choose a different camera in Settings. With preview enabled,
+the camera appears live at its selected corner, with mirror and green removal.
+Preview updates at 5 fps, or 2 fps in Low resource, independently of the one-fps
+screen thumbnail. The camera remains visible in Low resource preview while the
+screen thumbnail is suspended during recording.
+
+Enable the webcam before starting a take. You can then hide/show its overlay
+from the main screen during recording or pause. The reader remains open during
+the take so showing it again is immediate; **Off** hides it in both the preview
+and subsequent recorded frames. In idle mode Off releases the preview's camera
+lease. Turning the entire preview off or minimizing suspends camera thumbnails;
+an active recording keeps its own camera lease. GIF does not support the overlay.
+
+Settings persist per user; camera selection/placement lock during recording.
+Preview camera pixels are a separate thumbnail layer; recording composition
+continues in the native engine. Screenshots capture the source, not the overlay.
 
 ## Resources and ownership
 
@@ -32,7 +47,10 @@ chosen by the driver, so decoding may still process more than 15 frames/second.
 Conversion/publication occurs at most once per 67 ms; only the latest image is
 retained, with a reusable conversion buffer. JPEG full-range pixel formats are
 normalized with explicit color-range conversion so the scaler context can be
-reused. Camera pixels stay in Rust and never pass through Flutter/JSON.
+reused. Recording frames stay in Rust. Preview and recording share one reader;
+at most one <=320×240 premultiplied RGBA thumbnail crosses the binary FFI at a
+time. Flutter retains one image and disposes replaced/stale images, without
+filling its global image cache. Pixels are never JSON/base64 encoded.
 
 The recording worker retains one reference-counted clean screen frame when the
 camera is enabled. Reusing it keeps the camera moving when the desktop is static;
@@ -88,5 +106,18 @@ and decoded successfully. These are short functionality tests, not sustained
 performance measurements.
 
 The native reader follows [FFmpeg's DirectShow device API](https://www.ffmpeg.org/ffmpeg-devices.html#dshow).
-macOS/mobile camera composition, GPU composition and an interactive camera preview
-remain future work.
+macOS/mobile camera integration and GPU webcam composition remain future work.
+
+The WebcamPreview revision verified real camera thumbnails while recording only
+an owned synthetic Win32 window. Twenty-four thumbnail reads, live overlay
+hide/show, native screen thumbnails, full-window bounds and GPU pan checks passed;
+the recording fully decoded. No camera thumbnail was saved or displayed by the
+probe. Widget tests exercise changing images, delayed-frame cancellation, camera
+errors, minimized/Low resource suspension and the main On/Off button at 960×640.
+
+```powershell
+python tools/window_capture_smoke.py --library target/webcam-preview/release/recorder_core.dll --pan-probe target/webcam-preview/release/examples/pan_fixture.exe --webcam-preview
+```
+
+The optional test opens a real camera and writes its composite into the local
+owned-window test video; do not publish that video as a synthetic fixture.

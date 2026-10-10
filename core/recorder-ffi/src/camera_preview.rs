@@ -30,11 +30,21 @@ pub fn request(request: Request) -> Result<(), String> {
     {
         return Err("Choose a webcam in Settings before enabling it".into());
     }
-    if state.as_ref().is_some_and(|v| {
-        v.request.webcam.device == request.webcam.device
-            && v.request.low_resource == request.low_resource
-    }) {
-        state.as_mut().unwrap().request = request;
+    if state
+        .as_ref()
+        .is_some_and(|v| v.request.webcam.device == request.webcam.device)
+    {
+        let preview = state.as_mut().unwrap();
+        if preview.request.low_resource != request.low_resource {
+            // Keep the old lease alive while acquiring the new budget, so the
+            // reader updates conversion size rather than closing the device.
+            preview.camera = Camera::start(
+                request.webcam.device.clone(),
+                if request.low_resource { 320 } else { 640 },
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        preview.request = request;
         return Ok(());
     }
     *state = None;
