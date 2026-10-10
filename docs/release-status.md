@@ -1,4 +1,4 @@
-# Frame — Windows webcam alpha
+# Frame — Windows capture alpha
 
 This is a runnable Windows screen recorder, not the completed four-platform
 OBS/Bandicam competitor requested in the original specification.
@@ -12,8 +12,13 @@ OBS/Bandicam competitor requested in the original specification.
 - Native save dialog, output-file reveal, resolution/frame-rate/bitrate controls.
 - Separate settings panel and a main preview workspace with fixed recording controls.
 - Dark/Light theme selector with a saved per-user Windows preference.
-- Windows GDI/GDI+ thumbnail preview, limited to 480 × 270 at one update per second;
+- Windows WGC window thumbnails and GDI/GDI+ display/region thumbnails,
+  limited to 480 × 270 at one update per second;
   updates stop when disabled or the app is not active. Thumbnails stay in memory.
+- Full-window bounds including title bars, physical DPI coordinates, idle source
+  refresh every three seconds and explicit minimized-window restore status.
+- Smooth fixed-size region Follow mouse with in-place GPU crop updates;
+  pointer stays on the selected display and cursor recording is included.
 - NVENC/AMF GPU-surface paths, Quick Sync with CPU conversion, and libx264 fallback.
 - WASAPI default-system and default-microphone capture, saved as separate AAC
   tracks, converted to 48 kHz stereo through libswresample.
@@ -48,11 +53,31 @@ OBS/Bandicam competitor requested in the original specification.
 
 - Windows DirectShow webcam worker and YUV420P compositor with mirror, corner/size
   placement and soft green key; latest-frame buffering and camera-error telemetry.
+- Four cached Unicode title/logo layers, position/size/opacity/order controls,
+  and twenty saved creator layouts. Local image files are reloaded on restore.
+- Opt-in shortcut display with bounded expiry, global modifier combinations and
+  function keys; ordinary typed text and clipboard contents are excluded.
+- Non-blocking native WGC/D3D11 sampling with one retained GPU surface. Static
+  windows continue recording without delaying worker stop/audio/control polling.
   Webcam is opt-in and uses software encoding. See [webcam limitations](webcam.md).
 
 ## Verified on this machine
 
 - Rust compilation, Clippy and configuration/lifecycle regression tests.
+- 26 Rust tests and fourteen Flutter tests passed for the Creator revision;
+  Clippy with warnings denied and Flutter analysis passed.
+- Owned static Flutter window recorded 73–74 frames at 640 × 360 / 24 fps and
+  automatically finalized. Encoded Sinhala glyph pixels matched the uploaded
+  native Flutter raster; transparent logo/background and full decode verified.
+- Final packaged creator fixture exited successfully in 4.2 seconds; ordinary
+  startup smoke test also exited with code zero.
+- Creator settings/layout persistence and recording locks tested at 960 × 640.
+- Packaged Low resource Follow mouse region recording with Quick Sync,
+  physical viewport telemetry and pause/resume finalized successfully; decoded
+  video was verified at 640 × 360 / 24 fps.
+- Owned synthetic window: full title bar and bottom-corner video/preview pixels,
+  minimized-source rejection without creating an output, and left/right GPU
+  panning on the same graph verified. See [capture validation](capture.md).
 - Independent audio-track encoding with 44.1 kHz and 48 kHz input devices.
 - Actual desktop capture, GIF region capture, and MP4 region capture with pause.
 - Actual system-audio and two-track system/microphone recording.
@@ -101,7 +126,8 @@ observed in short smoke tests; sustained real-time throughput is not guaranteed.
 
 - Tested macOS ScreenCaptureKit/Metal implementation and signed packaging.
 - Android MediaProjection service and iOS ReplayKit broadcast-extension apps.
-- Unicode text annotations and configurable keystroke overlays. Current drawing takes place inside Frame's preview.
+- Live Unicode text editing during recording. Current drawing takes place inside
+  Frame's preview; title/logo layers are prepared before starting.
 - Accurate discontinuity/drift correction and long-duration synchronization,
   fault-injection and power-loss recovery tests.
 - Zero-CPU-readback Quick Sync interop and validation on actual NVENC/AMF devices.
@@ -113,8 +139,10 @@ observed in short smoke tests; sustained real-time throughput is not guaranteed.
 The generated macOS runner and mobile reserved directory are not functional
 recording products. No cross-platform or production-readiness claim is made.
 
-The lightweight preview is separate from the WGC recording pipeline. Protected,
-minimized or GPU-rendered windows can have unavailable or incomplete thumbnails.
+The lightweight preview is separate from the recording pipeline. Window
+thumbnails use WGC, supporting GPU-rendered windows. Protected windows can still
+refuse capture; minimized windows must be restored. Full-resolution window
+screenshots capture the visible desktop bounds and can include overlapping apps.
 Preview does not display native recorded cursor effects or verify the final
 encoded output; annotation guides are rendered over the preview separately.
 

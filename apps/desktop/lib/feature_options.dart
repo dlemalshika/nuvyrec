@@ -8,6 +8,9 @@ class FeatureOptions {
   bool systemMuted = false, microphoneMuted = false;
   bool mixAudio = true, denoise = false, gate = false, limiter = true;
   bool captureCursor = true;
+  bool followMouse = false;
+  bool layersEnabled = false, shortcutOverlay = false, shortcutRight = false;
+  int shortcutSeconds = 2;
   bool annotations = false;
   bool cursorHighlight = false, clickEffects = false;
   String performanceMode = 'automatic';
@@ -45,6 +48,11 @@ class FeatureOptions {
     'noise_gate': gate,
     'limiter': limiter,
     'capture_cursor': captureCursor,
+    'follow_mouse': followMouse,
+    'layers_enabled': layersEnabled,
+    'shortcut_overlay': shortcutOverlay,
+    'shortcut_seconds': shortcutSeconds,
+    'shortcut_right': shortcutRight,
     'replay_seconds': replaySeconds,
     'replay_mib': replayMiB,
     'annotations_enabled': annotations,
@@ -103,6 +111,11 @@ class FeatureOptions {
     gate = data['noise_gate'] as bool? ?? false;
     limiter = data['limiter'] as bool? ?? true;
     captureCursor = data['capture_cursor'] as bool? ?? true;
+    followMouse = data['follow_mouse'] == true;
+    layersEnabled = data['layers_enabled'] == true;
+    shortcutOverlay = data['shortcut_overlay'] == true;
+    shortcutRight = data['shortcut_right'] == true;
+    shortcutSeconds = bounded('shortcut_seconds', 2, 5).clamp(1, 5);
     annotations = data['annotations_enabled'] as bool? ?? false;
     cursorHighlight = data['cursor_highlight'] as bool? ?? false;
     clickEffects = data['click_effects'] as bool? ?? false;

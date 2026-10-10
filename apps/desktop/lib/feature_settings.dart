@@ -36,7 +36,7 @@ class FeatureSettings extends StatelessWidget {
           childrenPadding: const EdgeInsets.all(16),
           children: [
             const Text(
-              'Recorded-video overlay. Uses software H.264 encoding and adds CPU work. Camera frames are limited to 15 updates/second; Low resource uses a smaller camera image. The screen thumbnail does not show the final webcam composite.',
+              'Live webcam appears in the main preview and saved video. Uses software H.264 encoding. Camera frames are limited to 15 updates/second; preview uses 5 fps, or 2 fps in Low resource. Enable before recording, then show/hide it from the main screen.',
             ),
             TextButton.icon(
               onPressed: active || recorder.camerasLoading

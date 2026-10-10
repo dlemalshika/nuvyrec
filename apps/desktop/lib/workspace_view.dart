@@ -11,6 +11,7 @@ class RecorderWorkspace extends StatelessWidget {
     required this.recorder,
     required this.sourceControls,
     required this.previewSource,
+    this.creatorLayersEnabled = false,
     required this.previewEnabled,
     required this.onPreviewToggle,
     required this.onSettings,
@@ -19,14 +20,19 @@ class RecorderWorkspace extends StatelessWidget {
     required this.format,
     required this.onStart,
     this.performanceMode = 'manual',
+    this.webcam = const {},
+    this.onWebcamToggle,
   });
   final RecorderController recorder;
   final Widget sourceControls;
   final Map<String, dynamic>? previewSource;
+  final bool creatorLayersEnabled;
   final bool previewEnabled;
   final VoidCallback onPreviewToggle, onSettings, onStart, onLibrary;
   final String summary, format;
   final String performanceMode;
+  final Map<String, dynamic> webcam;
+  final VoidCallback? onWebcamToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -247,14 +253,37 @@ class RecorderWorkspace extends StatelessWidget {
                         children: [
                           Row(
                             children: [
-                              const Text(
-                                'Capture preview',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w600,
+                              const Expanded(
+                                child: Text(
+                                  'Capture preview',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ),
-                              const Spacer(),
+                              Tooltip(
+                                message: active && onWebcamToggle == null
+                                    ? 'Enable webcam before starting a recording'
+                                    : 'Show or hide webcam overlay',
+                                child: TextButton.icon(
+                                  key: const Key('workspace-webcam-toggle'),
+                                  onPressed: onWebcamToggle,
+                                  icon: Icon(
+                                    webcam['enabled'] == true
+                                        ? Icons.videocam_outlined
+                                        : Icons.videocam_off_outlined,
+                                    size: 19,
+                                  ),
+                                  label: Text(
+                                    webcam['enabled'] == true
+                                        ? 'Webcam On'
+                                        : 'Webcam Off',
+                                  ),
+                                ),
+                              ),
                               IconButton(
                                 onPressed: previewSource == null
                                     ? null
@@ -284,6 +313,10 @@ class RecorderWorkspace extends StatelessWidget {
                           Expanded(
                             child: AnnotationPreview(
                               recorder: recorder,
+                              layersEnabled: creatorLayersEnabled,
+                              webcam: webcam,
+                              webcamPreviewEnabled: previewEnabled,
+                              lowResource: performanceMode == 'eco',
                               source: previewSource,
                               enabled:
                                   previewEnabled &&

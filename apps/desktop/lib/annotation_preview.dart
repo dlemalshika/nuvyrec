@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'capture_preview.dart';
 import 'controller.dart';
+import 'creator_layers.dart';
+import 'webcam_preview.dart';
 
 /// Draw inside the letterboxed source, with bounded normalized geometry sent
 /// to Rust. Recorded pixels remain entirely in the native media pipeline.
@@ -12,10 +14,17 @@ class AnnotationPreview extends StatefulWidget {
     required this.recorder,
     required this.source,
     required this.enabled,
+    this.layersEnabled = false,
+    this.webcam = const {},
+    this.webcamPreviewEnabled = false,
+    this.lowResource = false,
   });
   final RecorderController recorder;
   final Map<String, dynamic>? source;
   final bool enabled;
+  final bool layersEnabled;
+  final Map<String, dynamic> webcam;
+  final bool webcamPreviewEnabled, lowResource;
   @override
   State<AnnotationPreview> createState() => _AnnotationPreviewState();
 }
@@ -137,6 +146,51 @@ class _AnnotationPreviewState extends State<AnnotationPreview> {
               fit: StackFit.expand,
               children: [
                 CapturePreview(source: source, enabled: widget.enabled),
+                WebcamPreview(
+                  recorder: widget.recorder,
+                  webcam: widget.webcam,
+                  enabled: widget.webcamPreviewEnabled,
+                  canvas: rect,
+                  lowResource: widget.lowResource,
+                ),
+                if (widget.enabled &&
+                    widget.layersEnabled &&
+                    widget.recorder.creatorLayers.entries.isNotEmpty &&
+                    (!widget.recorder.active ||
+                        widget.recorder.status['layers_enabled'] == true))
+                  IgnorePointer(
+                    child: CustomPaint(
+                      painter: CreatorLayerPainter(
+                        widget.recorder.creatorLayers,
+                        rect,
+                      ),
+                    ),
+                  ),
+                if (widget.recorder.active &&
+                    widget.recorder.status['shortcut_label'] is String &&
+                    widget.enabled)
+                  Positioned(
+                    left: widget.recorder.status['shortcut_right'] == true
+                        ? null
+                        : rect.left,
+                    right: widget.recorder.status['shortcut_right'] == true
+                        ? limits.maxWidth - rect.right
+                        : null,
+                    bottom: limits.maxHeight - rect.bottom,
+                    child: IgnorePointer(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        color: Colors.black87,
+                        child: Text(
+                          widget.recorder.status['shortcut_label'] as String,
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  ),
                 if (drawing)
                   GestureDetector(
                     behavior: HitTestBehavior.translucent,

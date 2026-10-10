@@ -5,10 +5,16 @@ import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:recorder_bridge/recorder_bridge.dart';
+import 'creator_layers.dart';
 
 class RecorderController extends ChangeNotifier {
+  RecorderController() {
+    creatorLayers.addListener(notifyListeners);
+  }
+  final creatorLayers = CreatorLayers();
   NativeRecorder? _native;
   Timer? _timer;
+  DateTime _lastSourceRefresh = DateTime.fromMillisecondsSinceEpoch(0);
   Timer? _countdownTimer, _scheduleTimer;
   int countdown = 0;
   DateTime? scheduledAt;
@@ -29,6 +35,34 @@ class RecorderController extends ChangeNotifier {
   String? cameraError;
   String? error;
   String? output;
+  Future<WebcamPreviewFrame?> webcamPreviewFrame(
+    Map<String, dynamic> webcam,
+    bool lowResource,
+  ) async {
+    _native?.requestWebcamPreview(webcam, lowResource);
+    return _native?.webcamPreviewFrame();
+  }
+
+  void stopWebcamPreview() {
+    try {
+      _native?.requestWebcamPreview({'enabled': false}, false);
+    } catch (_) {
+      /* Optional preview cleanup. */
+    }
+  }
+
+  bool setWebcamVisible(bool enabled) {
+    try {
+      _native?.command({'action': 'webcam_visible', 'enabled': enabled});
+      status['webcam_visible'] = enabled;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      showError(e.toString());
+      return false;
+    }
+  }
+
   static const host = MethodChannel('org.screenrecorder/host');
 
   String get state =>
@@ -76,6 +110,10 @@ class RecorderController extends ChangeNotifier {
       _timer = Timer.periodic(const Duration(milliseconds: 200), (_) {
         try {
           status = _native!.status();
+          if (!active &&
+              DateTime.now().difference(_lastSourceRefresh).inSeconds >= 3) {
+            refreshSources(automatic: true);
+          }
           _indexFinishedRecording();
           final replay = status['replay_output'] as String?;
           if (replay != null && replay != _indexedReplay) {
@@ -335,7 +373,8 @@ class RecorderController extends ChangeNotifier {
     }
   }
 
-  void refreshSources() {
+  void refreshSources({bool automatic = false}) {
+    _lastSourceRefresh = DateTime.now();
     try {
       final result = _native!.sources();
       machine = Map<String, dynamic>.from(result['performance'] as Map? ?? {});
@@ -343,7 +382,7 @@ class RecorderController extends ChangeNotifier {
           .cast<Map>()
           .map((s) => Map<String, dynamic>.from(s))
           .toList();
-      error = null;
+      if (!automatic) error = null;
     } catch (e) {
       error = e.toString();
     }
@@ -367,12 +406,39 @@ class RecorderController extends ChangeNotifier {
   }
 
   void start(Map<String, dynamic> config) {
+    if (active) return;
     if (_native == null) {
       error = 'The native recording engine is unavailable.';
       notifyListeners();
       return;
     }
-    _send({'action': 'start', 'config': config});
+    try {
+      _native!.command({'action': 'clear_layers'});
+      if (config['layers_enabled'] == true) {
+        if (!creatorLayers.ready || creatorLayers.entries.isEmpty) {
+          throw StateError(
+            'Wait for overlays to load or remove unavailable images',
+          );
+        }
+        for (var i = 0; i < creatorLayers.entries.length; i++) {
+          final entry = creatorLayers.entries[i];
+          final image = entry.image!;
+          _native!.uploadLayer({
+            'id': i,
+            'pixel_width': image.width,
+            'pixel_height': image.height,
+            'x': entry.spec.x,
+            'y': entry.spec.y,
+            'width': entry.spec.width,
+            'opacity': entry.spec.opacity,
+          }, entry.rgba!);
+        }
+      }
+      _native!.command({'action': 'start', 'config': config});
+      error = null;
+    } catch (e) {
+      error = e.toString();
+    }
     status = _native!.status();
     notifyListeners();
   }
@@ -415,10 +481,13 @@ class RecorderController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    stopWebcamPreview();
     _timer?.cancel();
     _countdownTimer?.cancel();
     _scheduleTimer?.cancel();
     host.setMethodCallHandler(null);
+    creatorLayers.removeListener(notifyListeners);
+    creatorLayers.dispose();
     super.dispose();
   }
 }

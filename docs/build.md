@@ -3,7 +3,8 @@
 ## Tested local tools
 
 - Rust 1.99.0, x86_64-pc-windows-msvc, Cargo/rustfmt/Clippy.
-- Visual Studio 2026 C++ build tools and Windows SDK.
+- Visual Studio 2026 C++ build tools, C++20 and Windows SDK 10.0.26100.0
+  including its C++/WinRT headers for the native WGC adapter.
 - Flutter 3.41.5, Dart 3.11.3, native Windows runner.
 - FFmpeg 8.1.2 full shared SDK; ffmpeg-sys-next pinned to 8.1.0.
 - libclang 18.1.1 installed inside .deps/clang for bindgen.
@@ -12,6 +13,10 @@ FFmpeg headers, import libraries and runtime DLLs must match. A CLI-only FFmpeg
 installation is insufficient. The engine links avcodec, avformat, avutil, avfilter
 avdevice, swscale and swresample; recording does not spawn the ffmpeg executable. CLI tools are
 used only for independent probe/decode verification.
+The engine's Windows-only Cargo build script compiles a small C++/WinRT/D3D11
+source adapter and links windowsapp, runtimeobject, d3d11, dxgi, d3dcompiler,
+dwmapi and user32. Rust owns its lifetime on the media thread; the GPU frames
+feed an ordinary FFmpeg buffer source. `FFMPEG_DIR` supplies the matching headers.
 
 ## Build this prepared workspace
 

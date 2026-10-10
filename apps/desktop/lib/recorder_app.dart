@@ -8,6 +8,8 @@ import 'feature_options.dart';
 import 'feature_settings.dart';
 import 'media_jobs.dart';
 import 'recording_library.dart';
+import 'creator_studio.dart';
+import 'creator_layers.dart';
 
 class RecorderApp extends StatefulWidget {
   const RecorderApp({super.key, this.controller});
@@ -27,6 +29,7 @@ class _RecorderAppState extends State<RecorderApp> {
   final features = FeatureOptions();
   final mediaJobs = MediaJobs();
   List<Map<String, dynamic>> savedPresets = [];
+  List<Map<String, dynamic>> creatorLayouts = [];
   Timer? _preferenceTimer;
   FrameColors get _colors => FrameColors(_themeMode == ThemeMode.light);
   final region = List.generate(4, (_) => TextEditingController());
@@ -47,6 +50,23 @@ class _RecorderAppState extends State<RecorderApp> {
     try {
       final saved = recorder.preferences['features'];
       if (saved is Map) features.restore(Map<String, dynamic>.from(saved));
+      await recorder.creatorLayers.restore(
+        recorder.preferences['overlays'] as List? ?? [],
+      );
+      if (!mounted) return;
+      creatorLayouts = (recorder.preferences['creator_layouts'] as List? ?? [])
+          .whereType<Map>()
+          .where(
+            (v) =>
+                v['name'] is String &&
+                (v['name'] as String).isNotEmpty &&
+                (v['name'] as String).length <= 48 &&
+                v['features'] is Map &&
+                v['overlays'] is List,
+          )
+          .take(20)
+          .map((v) => Map<String, dynamic>.from(v))
+          .toList();
       savedPresets = (recorder.preferences['presets'] as List? ?? [])
           .whereType<Map>()
           .where(
@@ -72,6 +92,8 @@ class _RecorderAppState extends State<RecorderApp> {
     _preferenceTimer = Timer(const Duration(milliseconds: 300), () {
       recorder.preferences['features'] = features.toJson();
       recorder.preferences['presets'] = savedPresets;
+      recorder.preferences['overlays'] = recorder.creatorLayers.toJson();
+      recorder.preferences['creator_layouts'] = creatorLayouts;
       recorder.savePreferences();
     });
   }
@@ -89,6 +111,107 @@ class _RecorderAppState extends State<RecorderApp> {
     if (format == 'gif') {
       maxHeight = 720;
       fps = 10;
+    }
+  }
+
+  Future<void> _saveCreatorLayout(BuildContext context) async {
+    final input = TextEditingController();
+    String? name;
+    try {
+      name = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Save creator layout'),
+          content: TextField(
+            controller: input,
+            maxLength: 48,
+            decoration: const InputDecoration(labelText: 'Layout name'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, input.text.trim()),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      input.dispose();
+    }
+    if (!mounted || name == null || name.isEmpty) return;
+    final existing = creatorLayouts.indexWhere((v) => v['name'] == name);
+    if (existing < 0 && creatorLayouts.length >= 20) {
+      recorder.showError('Up to 20 saved creator layouts');
+      return;
+    }
+    final layout = <String, dynamic>{
+      'name': name,
+      'features': features.toJson(),
+      'overlays': recorder.creatorLayers.toJson(),
+      'height': maxHeight,
+      'fps': fps,
+      'bitrate': bitrate,
+      'format': format,
+      'encoder': encoder,
+    };
+    setState(() {
+      if (existing < 0) {
+        creatorLayouts.add(layout);
+      } else {
+        creatorLayouts[existing] = layout;
+      }
+    });
+    _saveFeatures();
+    recorder.notice = 'Creator layout saved';
+    recorder.notifyLibraryChanged();
+  }
+
+  Future<void> _loadCreatorLayout(Map<String, dynamic> layout) async {
+    if (recorder.active || recorder.scheduledAt != null) return;
+    // Validate descriptions before changing the current usable layout.
+    final overlays = layout['overlays'] as List;
+    for (final value in overlays.take(4)) {
+      if (value is! Map) throw const FormatException('Invalid saved layer');
+      OverlaySpec.fromJson(value);
+    }
+    final nextFeatures = FeatureOptions()
+      ..restore(Map<String, dynamic>.from(layout['features'] as Map));
+    final quality = <String, dynamic>{
+      for (final key in ['height', 'fps', 'bitrate'])
+        key: layout[key] is num ? layout[key] : null,
+    };
+    setState(() {
+      features.restore(nextFeatures.toJson());
+      _preset(quality);
+      final nextFormat = layout['format'];
+      if (['mkv', 'mp4', 'avi', 'gif'].contains(nextFormat) &&
+          format != nextFormat) {
+        format = nextFormat as String;
+        recorder.output = null;
+      }
+      if ([
+        'auto',
+        'libx264',
+        'h264_nvenc',
+        'h264_amf',
+        'h264_qsv',
+      ].contains(layout['encoder'])) {
+        encoder = layout['encoder'] as String;
+      }
+      if (format == 'gif') {
+        maxHeight = 720;
+        fps = 10;
+      }
+    });
+    await recorder.creatorLayers.restore(overlays);
+    if (mounted) {
+      _saveFeatures();
+      recorder.notice = 'Creator layout loaded';
+      recorder.notifyLibraryChanged();
     }
   }
 
@@ -205,10 +328,10 @@ class _RecorderAppState extends State<RecorderApp> {
     final kind = mode == 'window' ? 'window' : 'display';
     final choices = recorder.sources.where((s) => s['kind'] == kind).toList();
     if (choices.isEmpty) return null;
-    return choices.firstWhere(
-      (s) => s['id'] == sourceId,
-      orElse: () => choices.first,
-    );
+    if (sourceId == null) {
+      return choices.where((s) => s['minimized'] != true).firstOrNull;
+    }
+    return choices.where((s) => s['id'] == sourceId).firstOrNull;
   }
 
   void start() {
@@ -221,13 +344,23 @@ class _RecorderAppState extends State<RecorderApp> {
 
   Map<String, dynamic>? _recordingConfig() {
     final source = selected;
-    if (source == null || recorder.output == null) {
+    if (source == null ||
+        source['minimized'] == true ||
+        recorder.output == null) {
       recorder.showError(
         'Choose a capture source and a new output file first.',
       );
       return null;
     }
     List<int>? crop;
+    if (format != 'gif' &&
+        features.layersEnabled &&
+        !recorder.creatorLayers.ready) {
+      recorder.showError(
+        'Wait for overlays to load or remove unavailable logo files.',
+      );
+      return null;
+    }
     if (mode == 'region') {
       crop = region.map((c) => int.tryParse(c.text)).whereType<int>().toList();
       if (crop.length != 4) {
@@ -247,6 +380,14 @@ class _RecorderAppState extends State<RecorderApp> {
     final extras = features.toJson()..remove('countdown');
     return {
       ...extras,
+      'layers_enabled':
+          format != 'gif' &&
+          features.layersEnabled &&
+          recorder.creatorLayers.entries.isNotEmpty,
+      'shortcut_overlay': format != 'gif' && features.shortcutOverlay,
+      'follow_mouse': mode == 'region' && features.followMouse,
+      'capture_cursor':
+          features.captureCursor || (mode == 'region' && features.followMouse),
       'replay_seconds': format == 'gif' ? 0 : features.replaySeconds,
       'annotations_enabled': format != 'gif' && features.annotations,
       'segment_seconds': format == 'mkv' ? features.segmentSeconds : 0,
@@ -269,6 +410,9 @@ class _RecorderAppState extends State<RecorderApp> {
       'bitrate': bitrate * 1000000,
       'encoder':
           (features.annotations ||
+                  (features.layersEnabled &&
+                      recorder.creatorLayers.entries.isNotEmpty) ||
+                  features.shortcutOverlay ||
                   features.webcamEnabled ||
                   ((features.cursorHighlight || features.clickEffects) &&
                       mode != 'window')) &&
@@ -291,7 +435,12 @@ class _RecorderAppState extends State<RecorderApp> {
       'frame_height': source['height'],
     };
     if (mode == 'region') {
-      final values = region.map((c) => int.tryParse(c.text)).toList();
+      final liveRegion = recorder.active && features.followMouse
+          ? recorder.status['current_region'] as List?
+          : null;
+      final values =
+          liveRegion?.cast<int>() ??
+          region.map((c) => int.tryParse(c.text)).toList();
       if (values.any((v) => v == null)) return null;
       args.addAll({
         'left': values[0],
@@ -303,6 +452,38 @@ class _RecorderAppState extends State<RecorderApp> {
       });
     }
     return args;
+  }
+
+  Future<void> _toggleWebcam() async {
+    if (recorder.active) {
+      if (!['recording', 'paused'].contains(recorder.state) ||
+          recorder.status['webcam_available'] != true) {
+        return;
+      }
+      final enabled = recorder.status['webcam_visible'] != true;
+      if (!recorder.setWebcamVisible(enabled)) return;
+      setState(() => features.webcamEnabled = enabled);
+      _saveFeatures();
+      return;
+    }
+    if (recorder.scheduledAt != null ||
+        recorder.camerasLoading ||
+        format == 'gif') {
+      return;
+    }
+    if (!features.webcamEnabled && features.webcamDevice.isEmpty) {
+      if (recorder.cameras.isEmpty) await recorder.refreshCameras();
+      if (!mounted) return;
+      if (recorder.cameras.isEmpty) {
+        recorder.showError(
+          'No webcam found. Check Settings → Webcam and Windows camera permissions.',
+        );
+        return;
+      }
+      features.webcamDevice = recorder.cameras.first['id'] as String;
+    }
+    setState(() => features.webcamEnabled = !features.webcamEnabled);
+    _saveFeatures();
   }
 
   @override
@@ -319,7 +500,26 @@ class _RecorderAppState extends State<RecorderApp> {
         sourceControls: _sourceControls(),
         previewSource: previewSource,
         previewEnabled: previewEnabled,
+        creatorLayersEnabled: features.layersEnabled,
         performanceMode: features.performanceMode,
+        webcam: {
+          ...features.webcam,
+          'enabled':
+              format != 'gif' &&
+              (recorder.active
+                  ? recorder.status['webcam_visible'] as bool? ??
+                        features.webcamEnabled
+                  : features.webcamEnabled),
+        },
+        onWebcamToggle:
+            format == 'gif' ||
+                recorder.scheduledAt != null ||
+                recorder.camerasLoading ||
+                (recorder.active &&
+                    (!['recording', 'paused'].contains(recorder.state) ||
+                        recorder.status['webcam_available'] != true))
+            ? null
+            : _toggleWebcam,
         onPreviewToggle: () => setState(() => previewEnabled = !previewEnabled),
         onSettings: () => _showSettings(context),
         onLibrary: () => showRecordingLibrary(context, recorder, mediaJobs),
@@ -378,8 +578,9 @@ class _RecorderAppState extends State<RecorderApp> {
             .map(
               (s) => DropdownMenuItem<int>(
                 value: s['id'] as int,
+                enabled: s['minimized'] != true,
                 child: Text(
-                  s['name'] as String,
+                  '${s['name']}${s['minimized'] == true ? ' · restore window' : ''}',
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -388,6 +589,20 @@ class _RecorderAppState extends State<RecorderApp> {
         onChanged: active ? null : (v) => setState(() => sourceId = v),
       ),
       if (mode == 'region') ...[
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Follow mouse'),
+          subtitle: const Text(
+            'Smoothly move this area with the pointer. Size stays fixed; cursor is included.',
+          ),
+          value: features.followMouse,
+          onChanged: active
+              ? null
+              : (v) {
+                  setState(() => features.followMouse = v);
+                  _saveFeatures();
+                },
+        ),
         const SizedBox(height: 12),
         OutlinedButton.icon(
           onPressed: active
@@ -544,6 +759,22 @@ class _RecorderAppState extends State<RecorderApp> {
                           ]),
                           const SizedBox(height: 16),
                           _quality(active, change),
+                          const SizedBox(height: 16),
+                          AnimatedBuilder(
+                            animation: recorder,
+                            builder: (context, _) => CreatorStudio(
+                              recorder: recorder,
+                              options: features,
+                              layouts: creatorLayouts,
+                              onChanged: () => change(_saveFeatures),
+                              onSaveLayout: () => _saveCreatorLayout(context),
+                              onLoadLayout: _loadCreatorLayout,
+                              onDeleteLayout: (i) => change(() {
+                                creatorLayouts.removeAt(i);
+                                _saveFeatures();
+                              }),
+                            ),
+                          ),
                           const SizedBox(height: 16),
                           AnimatedBuilder(
                             animation: recorder,

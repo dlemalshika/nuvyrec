@@ -6,8 +6,8 @@
 
 #include "flutter/generated_plugin_registrant.h"
 
-FlutterWindow::FlutterWindow(const flutter::DartProject& project, bool smoke_test)
-    : project_(project), smoke_test_(smoke_test) {}
+FlutterWindow::FlutterWindow(const flutter::DartProject& project, bool smoke_test, bool creator_fixture)
+    : project_(project), smoke_test_(smoke_test), creator_fixture_(creator_fixture) {}
 
 FlutterWindow::~FlutterWindow() {}
 
@@ -27,7 +27,7 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
-  RegisterRecorderHost(flutter_controller_->engine()->messenger(), GetHandle());
+  RegisterRecorderHost(flutter_controller_->engine()->messenger(), GetHandle(), creator_fixture_);
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -36,7 +36,8 @@ bool FlutterWindow::OnCreate() {
       PostMessage(GetHandle(), WM_CLOSE, 0, 0);
       return;
     }
-    this->Show();
+    if (creator_fixture_) ShowWindow(GetHandle(), SW_SHOWNOACTIVATE);
+    else this->Show();
   });
 
   // Flutter can complete the first frame before the "show window" callback is
@@ -60,6 +61,13 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (creator_fixture_ && message == WM_DESTROY) {
+    const int exit_code = GetPropW(hwnd, L"Frame.CreatorFixtureResult") == reinterpret_cast<HANDLE>(1) ? 0 : 1;
+    SetQuitOnClose(false);
+    const auto result = Win32Window::MessageHandler(hwnd, message, wparam, lparam);
+    PostQuitMessage(exit_code);
+    return result;
+  }
   if (HandleRecorderHostMessage(hwnd, message, wparam, lparam)) return 0;
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {

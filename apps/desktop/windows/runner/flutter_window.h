@@ -12,7 +12,7 @@
 class FlutterWindow : public Win32Window {
  public:
   // Creates a new FlutterWindow hosting a Flutter view running |project|.
-  explicit FlutterWindow(const flutter::DartProject& project, bool smoke_test = false);
+  explicit FlutterWindow(const flutter::DartProject& project, bool smoke_test = false, bool creator_fixture = false);
   virtual ~FlutterWindow();
 
  protected:
@@ -30,6 +30,7 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
   bool closing_after_recording_ = false;
   bool smoke_test_ = false;
+  bool creator_fixture_ = false;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

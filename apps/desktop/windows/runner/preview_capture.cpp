@@ -7,6 +7,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <string>
+#include <dwmapi.h>
 
 namespace {
 int64_t Number(const flutter::EncodableMap& args, const char* key, int64_t fallback = 0) {
@@ -59,10 +60,12 @@ std::vector<uint8_t> CapturePreview(const flutter::EncodableMap& args) {
     origin_x = bounds.left;
     origin_y = bounds.top;
   } else if (name == "window") {
-    surface.window = reinterpret_cast<HWND>(id);
-    if (!IsWindow(surface.window) || IsIconic(surface.window) ||
-        !GetClientRect(surface.window, &bounds))
+    auto window = reinterpret_cast<HWND>(id);
+    if (!IsWindow(window) || IsIconic(window) || !GetWindowRect(window, &bounds))
       throw std::runtime_error("Open the selected window to see its preview.");
+    DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &bounds, sizeof(bounds));
+    origin_x = bounds.left;
+    origin_y = bounds.top;
   } else {
     throw std::runtime_error("Unsupported preview source");
   }
@@ -82,6 +85,35 @@ std::vector<uint8_t> CapturePreview(const flutter::EncodableMap& args) {
       static_cast<double>(max_height) / static_cast<double>(height)});
   const int thumbnail_width = std::max(1, static_cast<int>(std::round(width * ratio)));
   const int thumbnail_height = std::max(1, static_cast<int>(std::round(height * ratio)));
+  if (name == "window" && max_width <= 480 && max_height <= 270) {
+    // Flutter loads the core before previews. Never load a DLL from PATH.
+    auto module = GetModuleHandleW(L"recorder_core.dll");
+    using Request = char* (*)(const char*);
+    using Read = uint8_t* (*)(size_t*);
+    using Free = void (*)(uint8_t*, size_t);
+    using FreeString = void (*)(char*);
+    auto request = reinterpret_cast<Request>(GetProcAddress(module, "recorder_preview_request_json"));
+    auto read = reinterpret_cast<Read>(GetProcAddress(module, "recorder_preview_png"));
+    auto release = reinterpret_cast<Free>(GetProcAddress(module, "recorder_preview_free"));
+    auto release_string = reinterpret_cast<FreeString>(GetProcAddress(module, "recorder_string_free"));
+    if (!request || !read || !release || !release_string)
+      throw std::runtime_error("Update the native core to enable window preview");
+    auto json = std::string("{\"id\":") + std::to_string(id) + ",\"width\":" +
+        std::to_string(thumbnail_width) + ",\"height\":" + std::to_string(thumbnail_height) + "}";
+    auto response = request(json.c_str());
+    if (!response) throw std::runtime_error("Preview allocation failed");
+    const std::string status(response);
+    release_string(response);
+    if (status.find("\"ok\":true") == std::string::npos)
+      throw std::runtime_error("Window preview unavailable; restore the window");
+    size_t length = 0;
+    auto png = read(&length);
+    if (!png) return {}; // async capture pending; keep the previous thumbnail
+    struct Owned { uint8_t* data; size_t size; Free release; ~Owned() { release(data,size); } } owned{png,length,release};
+    if (length > 2 * 1024 * 1024) throw std::runtime_error("Invalid thumbnail size");
+    return std::vector<uint8_t>(png,png+length);
+  }
+  // Full-size screenshots use the visible desktop compositor and full bounds.
   surface.source = GetDC(surface.window);
   if (!surface.source) throw std::runtime_error("Preview source unavailable");
   surface.target = CreateCompatibleDC(surface.source);

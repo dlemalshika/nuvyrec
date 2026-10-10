@@ -8,12 +8,13 @@ use std::{
     ptr,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, OnceLock, Weak,
     },
     thread,
     time::{Duration, Instant},
 };
 static CAMERA_BUSY: AtomicBool = AtomicBool::new(false);
+static SHARED_CAMERA: OnceLock<Mutex<Weak<CameraLife>>> = OnceLock::new();
 static REGISTER_DEVICES: std::sync::Once = std::sync::Once::new();
 struct Lease;
 impl Drop for Lease {
@@ -79,13 +80,36 @@ pub struct Image {
 pub struct Camera {
     pub latest: Arc<Mutex<Option<Image>>>,
     pub error: Arc<Mutex<Option<String>>>,
+    _life: Arc<CameraLife>,
+}
+/// Preview and recording lease the same reader, never open a device twice.
+/// The last lease requests shutdown; a stuck driver retains only its one worker.
+struct CameraLife {
+    device: String,
+    max_width: usize,
+    latest: Arc<Mutex<Option<Image>>>,
+    error: Arc<Mutex<Option<String>>>,
     stop: Arc<AtomicBool>,
-    thread: Option<thread::JoinHandle<()>>,
+    thread: Mutex<Option<thread::JoinHandle<()>>>,
 }
 impl Camera {
     pub fn start(device: String, max_width: usize) -> Result<Self> {
         if !(160..=640).contains(&max_width) {
             return Err(Error::Invalid("invalid camera budget"));
+        }
+        let mut shared = SHARED_CAMERA
+            .get_or_init(|| Mutex::new(Weak::new()))
+            .lock()
+            .map_err(|_| Error::State("camera lease lock failed"))?;
+        if let Some(life) = shared.upgrade() {
+            if life.device != device || life.max_width != max_width {
+                return Err(Error::State("camera settings are changing; retry shortly"));
+            }
+            return Ok(Self {
+                latest: life.latest.clone(),
+                error: life.error.clone(),
+                _life: life,
+            });
         }
         if CAMERA_BUSY
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -100,31 +124,45 @@ impl Camera {
         let error = Arc::new(Mutex::new(None));
         let stop = Arc::new(AtomicBool::new(false));
         let (image, failure, cancel) = (latest.clone(), error.clone(), stop.clone());
+        let reader_device = device.clone();
         let thread = thread::Builder::new()
             .name("frame-camera".into())
             .spawn(move || {
                 let _lease = lease;
-                if let Err(e) = read_camera(&device, max_width, cancel, image) {
+                if let Err(e) = read_camera(&reader_device, max_width, cancel, image) {
                     if let Ok(mut value) = failure.lock() {
                         *value = Some(e.to_string());
                     }
                 }
             })
             .map_err(|_| Error::State("camera worker creation failed"))?;
+        let life = Arc::new(CameraLife {
+            device,
+            max_width,
+            latest: latest.clone(),
+            error: error.clone(),
+            stop,
+            thread: Mutex::new(Some(thread)),
+        });
+        *shared = Arc::downgrade(&life);
         Ok(Self {
             latest,
             error,
-            stop,
-            thread: Some(thread),
+            _life: life,
         })
     }
 }
-impl Drop for Camera {
+impl Drop for CameraLife {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
         // Drivers may ignore FFmpeg's interrupt callback. Never block UI/recording
         // finalization on such a driver; its thread owns all retained resources.
-        if let Some(thread) = self.thread.take() {
+        if let Some(thread) = self
+            .thread
+            .get_mut()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
             if thread.is_finished() {
                 let _ = thread.join();
             }
@@ -402,6 +440,55 @@ impl Placement {
             && (0.01..=0.3).contains(&self.softness)
     }
 }
+impl Image {
+    /// Small premultiplied RGBA thumbnail for Flutter. Key/mirror match the
+    /// recorded compositor. Latest-only copying keeps UI queues bounded.
+    pub fn preview_rgba(&self, place: &Placement) -> Result<(usize, usize, Vec<u8>)> {
+        if !place.valid()
+            || self.width == 0
+            || self.height == 0
+            || self.width > 640
+            || self.height > 480
+            || self.bgra.len() != self.width * self.height * 4
+        {
+            return Err(Error::Invalid("invalid webcam preview image"));
+        }
+        let ratio = (320.0 / self.width as f64)
+            .min(240.0 / self.height as f64)
+            .min(1.0);
+        let w = (self.width as f64 * ratio).floor().max(1.0) as usize;
+        let h = (self.height as f64 * ratio).floor().max(1.0) as usize;
+        let mut output = vec![0; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let sx = x * self.width / w;
+                let sx = if place.mirror {
+                    self.width - 1 - sx
+                } else {
+                    sx
+                };
+                let p = (y * self.height / h * self.width + sx) * 4;
+                let [b, g, r] = [
+                    self.bgra[p] as f32,
+                    self.bgra[p + 1] as f32,
+                    self.bgra[p + 2] as f32,
+                ];
+                let alpha = if place.key {
+                    (((r * r + (g - 255.0).powi(2) + b * b).sqrt() / 441.673 - place.similarity)
+                        / place.softness)
+                        .clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
+                let dst = (y * w + x) * 4;
+                for (index, color) in [r, g, b, 255.0].iter().enumerate() {
+                    output[dst + index] = (color * alpha).round() as u8;
+                }
+            }
+        }
+        Ok((w, h, output))
+    }
+}
 impl VideoFrame {
     pub fn webcam(&mut self, image: &Image, place: &Placement) -> Result<()> {
         if !place.valid()
@@ -492,6 +579,35 @@ impl VideoFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn preview_is_bounded_mirrored_and_premultiplied_with_key() {
+        let image = fixture();
+        let (w,h,pixels) = image.preview_rgba(&placement(true,false)).unwrap();
+        assert_eq!((w,h), (4,2));
+        assert_eq!(&pixels[..4], &[0,0,0,0]);
+        assert_eq!(&pixels[8..12], &[255,0,0,255]);
+        let (_,_,mirrored) = image.preview_rgba(&placement(true,true)).unwrap();
+        assert_eq!(&mirrored[..4], &[255,0,0,255]);
+        let large = Image { width:640,height:480,bgra:vec![255;640*480*4],captured:Instant::now() };
+        let (w,h,rgba) = large.preview_rgba(&placement(false,false)).unwrap();
+        assert_eq!((w,h,rgba.len()),(320,240,320*240*4));
+    }
+    #[test]
+    fn preview_and_recording_share_one_reader_until_final_lease() {
+        // Inject an owned image, not a physical device. This exercises real
+        // lease selection/shutdown without camera permissions or a driver.
+        let stop = Arc::new(AtomicBool::new(false));
+        let life = Arc::new(CameraLife { device:"fixture-camera".into(),max_width:320,latest:Arc::new(Mutex::new(Some(fixture()))),error:Arc::new(Mutex::new(None)),stop:stop.clone(),thread:Mutex::new(None) });
+        *SHARED_CAMERA.get_or_init(|| Mutex::new(Weak::new())).lock().unwrap() = Arc::downgrade(&life);
+        let preview = Camera::start("fixture-camera".into(),320).unwrap();
+        let recording = Camera::start("fixture-camera".into(),320).unwrap();
+        assert!(Arc::ptr_eq(&preview.latest,&recording.latest));
+        assert!(Camera::start("different-camera".into(),320).is_err());
+        drop(life); drop(preview);
+        assert!(!stop.load(Ordering::Acquire));
+        drop(recording);
+        assert!(stop.load(Ordering::Acquire));
+    }
     fn placement(key: bool, mirror: bool) -> Placement {
         Placement {
             x: 1.0,

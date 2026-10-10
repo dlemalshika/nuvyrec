@@ -14,11 +14,13 @@ Priorities are recommendations for Frame's lightweight recorder focus.
 | Library, screenshots, remux, trim/crop | Implemented; synthetic export/probe/decode tests passed |
 | Replay history | Implemented; bounded encoded-packet history, MKV save, keyframe/timestamp tests |
 | Recovery segmentation | Implemented for MKV; finalized parts retained; current part not guaranteed |
-| Drawing/arrows/boxes/spotlight | Implemented in preview; recorded CPU compositor verified; text pending |
-| Cursor highlight/click rings | Implemented for display/region, software path; keystroke overlay pending |
-| Webcam/chroma key, scenes/source layers | Pending |
+| Drawing/arrows/boxes/spotlight | Implemented in preview and recorded CPU compositor; Unicode titles prepared before recording |
+| Cursor highlight/click rings, shortcut display | Implemented; shortcuts opt-in, ordinary typing excluded, software H.264 |
+| Webcam/chroma key | Implemented; bounded camera worker, actual capture verified |
+| Text/logo layers and saved creator layouts | Implemented; four cached layers, twenty layouts; live text editing and multi-source transitions pending |
 | Streaming/reconnect, automatic captions/smart zoom | Pending |
-| Adaptive quality, HEVC/AV1/HDR | Pending |
+| Adaptive quality | Implemented for segmented MKV; measured overload reduces quality without increasing resources |
+| HEVC/AV1/HDR | Pending |
 | macOS, Android, iOS | Native capture integration pending |
 
 Optional CPU effects are off by default. Enable them before recording; audio

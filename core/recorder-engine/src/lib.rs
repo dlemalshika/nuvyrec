@@ -9,6 +9,7 @@ pub mod audio_processor;
 pub mod capture;
 mod error;
 mod frame;
+pub mod layers;
 mod output;
 pub mod overlay;
 mod replay;

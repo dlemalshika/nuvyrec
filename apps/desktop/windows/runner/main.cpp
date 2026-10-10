@@ -28,6 +28,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
       command_line_arguments.end(), "--smoke-test") != command_line_arguments.end();
   const bool preview_test = std::find(command_line_arguments.begin(),
       command_line_arguments.end(), "--preview-smoke-test") != command_line_arguments.end();
+  const bool creator_test = std::find(command_line_arguments.begin(),
+      command_line_arguments.end(), "--creator-smoke-test") != command_line_arguments.end();
   if (preview_test) {
     try {
       auto monitor = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
@@ -42,7 +44,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
-  FlutterWindow window(project, smoke_test || preview_test);
+  FlutterWindow window(project, smoke_test || preview_test, creator_test);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
   if (!window.Create(L"Frame — Screen Recorder", origin, size)) {
@@ -57,5 +59,5 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   ::CoUninitialize();
-  return EXIT_SUCCESS;
+  return static_cast<int>(msg.wParam);
 }

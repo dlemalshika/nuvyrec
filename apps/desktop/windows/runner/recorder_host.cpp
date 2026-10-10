@@ -45,20 +45,40 @@ std::string Argument(const flutter::MethodCall<flutter::EncodableValue>& call, c
   return value ? *value : std::string();
 }
 }
-void RegisterRecorderHost(flutter::BinaryMessenger* messenger, HWND owner) {
+void RegisterRecorderHost(flutter::BinaryMessenger* messenger, HWND owner, bool creator_fixture) {
   channel = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(messenger, "org.screenrecorder/host", &flutter::StandardMethodCodec::GetInstance());
-  channel->SetMethodCallHandler([owner](const auto& call, auto result) {
-    if (call.method_name() == "setMediaBusy") {
+  channel->SetMethodCallHandler([owner, creator_fixture](const auto& call, auto result) {
+    if (call.method_name() == "creatorFixtureHandle") {
+      if (!creator_fixture) { result->Error("fixture", "Fixture mode is not active"); return; }
+      result->Success(flutter::EncodableValue(static_cast<int64_t>(reinterpret_cast<uintptr_t>(owner))));
+    } else if (call.method_name() == "finishCreatorFixture") {
+      if (!creator_fixture) { result->Error("fixture", "Fixture mode is not active"); return; }
+      const auto* args = call.arguments() ? std::get_if<flutter::EncodableMap>(call.arguments()) : nullptr;
+      bool ok = false;
+      if (args) {
+        auto it = args->find(flutter::EncodableValue("ok"));
+        if (it != args->end()) if (auto value = std::get_if<bool>(&it->second)) ok = *value;
+      }
+      result->Success();
+      // Tear down the window/Flutter controller before leaving its COM
+      // apartment. Posting WM_QUIT here bypasses OnDestroy and leaves a live
+      // Flutter HWND during controller destruction.
+      SetPropW(owner, L"Frame.CreatorFixtureResult", reinterpret_cast<HANDLE>(static_cast<uintptr_t>(ok ? 1 : 2)));
+      PostMessageW(owner, WM_CLOSE, 0, 0);
+    } else if (call.method_name() == "setMediaBusy") {
       const auto* value = call.arguments() ? std::get_if<bool>(call.arguments()) : nullptr;
       media_busy = value && *value;
       result->Success();
-    } else if (call.method_name() == "chooseRecording") {
+    } else if (call.method_name() == "chooseRecording" || call.method_name() == "chooseOverlayImage") {
       Microsoft::WRL::ComPtr<IFileOpenDialog> dialog;
       if (FAILED(CoCreateInstance(CLSID_FileOpenDialog,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&dialog)))) {
         result->Error("dialog","Could not open recording picker"); return;
       }
       COMDLG_FILTERSPEC filter{L"Recordings",L"*.mkv;*.mp4;*.avi;*.mov;*.gif"};
-      dialog->SetFileTypes(1,&filter); dialog->SetTitle(L"Import a recording for playback or export");
+      const bool overlay = call.method_name() == "chooseOverlayImage";
+      if (overlay) filter = {L"Overlay images",L"*.png;*.jpg;*.jpeg;*.webp"};
+      dialog->SetFileTypes(1,&filter);
+      dialog->SetTitle(overlay ? L"Choose a logo or watermark image" : L"Import a recording for playback or export");
       const auto hr=dialog->Show(owner);
       if (hr==HRESULT_FROM_WIN32(ERROR_CANCELLED)) { result->Success(); return; }
       Microsoft::WRL::ComPtr<IShellItem> item; PWSTR path=nullptr;
@@ -192,7 +212,11 @@ void RegisterRecorderHost(flutter::BinaryMessenger* messenger, HWND owner) {
     } else if (call.method_name() == "capturePreview") {
       const auto* args = call.arguments() ? std::get_if<flutter::EncodableMap>(call.arguments()) : nullptr;
       if (!args) { result->Error("preview", "Choose a preview source"); return; }
-      try { result->Success(flutter::EncodableValue(CapturePreview(*args))); }
+      try {
+        auto png = CapturePreview(*args);
+        if (png.empty()) result->Success();
+        else result->Success(flutter::EncodableValue(std::move(png)));
+      }
       catch (const std::exception& error) { result->Error("preview", error.what()); }
     } else if (call.method_name() == "chooseOutput") {
       auto format = Argument(call, "format");

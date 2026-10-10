@@ -14,6 +14,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--format', choices=['mkv','mp4','avi','gif'], default='mkv')
 parser.add_argument('--region', action='store_true')
+parser.add_argument('--follow', action='store_true', help='Verify physical-pointer region tracking without moving the system pointer')
 parser.add_argument('--pause', action='store_true')
 parser.add_argument('--audio', choices=['none','system','microphone','both'], default='none')
 parser.add_argument('--bundle', type=Path)
@@ -91,6 +92,9 @@ if args.segments:
     config.update(segment_seconds=2, max_seconds=5)
 if args.region:
     config['region'] = [0, 0, min(640, source['width']), min(360, source['height'])]
+if args.follow:
+    if not args.region: raise ValueError('--follow requires --region')
+    config['follow_mouse'] = True
 if args.webcam:
     config.update(webcam={'enabled':True,'device':camera_devices['devices'][0]['id'],'key':True}, max_seconds=10)
 if args.missing_webcam:
@@ -101,10 +105,16 @@ started = None
 saved_replay = False
 reduced_quality = False
 saw_camera = False
+saw_follow = False
 try:
     while time.monotonic() < deadline:
         status = read(library.recorder_status_json())
         saw_camera = saw_camera or status.get('webcam_ready',False)
+        if args.follow and status.get('current_region'):
+            x,y,width,height=status['current_region']
+            assert [width,height]==config['region'][2:]
+            assert x>=0 and y>=0 and x+width<=source['width'] and y+height<=source['height']
+            saw_follow=True
         if args.webcam and status.get('webcam_error'): raise RuntimeError(status['webcam_error'])
         if status['state'] == 'failed':
             raise RuntimeError(status.get('error'))
@@ -156,11 +166,13 @@ try:
     if args.adaptive:
         assert len(status['outputs']) >= 2 and status['effective_height'] < 1080, status
     if args.webcam: assert saw_camera, 'Camera never produced a usable frame'
+    if args.follow: assert saw_follow, 'Follow mouse never published its physical viewport'
     if args.missing_webcam: assert status.get('webcam_error') and not saw_camera, status
     print(json.dumps({'file': str(output), 'frames': status['frames'],
                       'encoder': status['encoder'], 'state': status['state'],
                       'replay': str(replay_output) if args.features else None,
                       'outputs': status.get('outputs'),
+                      'follow_verified': saw_follow if args.follow else None,
                       'effective_profile': [status.get('effective_width'),status.get('effective_height'),status.get('effective_fps')],
                       'stop_reason': status.get('stop_reason')}))
 finally:

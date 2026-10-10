@@ -41,10 +41,63 @@ pub struct Source {
     pub name: String,
     pub width: u32,
     pub height: u32,
+    pub minimized: bool,
+}
+
+#[cfg(windows)]
+pub struct PhysicalCoordinates(windows_sys::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT);
+#[cfg(windows)]
+impl PhysicalCoordinates {
+    pub fn enter() -> Self {
+        Self(unsafe {
+            windows_sys::Win32::UI::HiDpi::SetThreadDpiAwarenessContext(
+                windows_sys::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+            )
+        })
+    }
+}
+#[cfg(windows)]
+impl Drop for PhysicalCoordinates {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                windows_sys::Win32::UI::HiDpi::SetThreadDpiAwarenessContext(self.0);
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+pub fn local_pointer(id: u64) -> Option<[f64; 2]> {
+    use windows_sys::Win32::{
+        Foundation::POINT, Graphics::Gdi::*, UI::WindowsAndMessaging::GetCursorPos,
+    };
+    let _dpi = PhysicalCoordinates::enter();
+    unsafe {
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        let mut point = POINT::default();
+        if GetMonitorInfoW(id as usize as HMONITOR, &mut info) == 0 || GetCursorPos(&mut point) == 0
+        {
+            return None;
+        }
+        if point.x < info.rcMonitor.left
+            || point.y < info.rcMonitor.top
+            || point.x >= info.rcMonitor.right
+            || point.y >= info.rcMonitor.bottom
+        {
+            return None;
+        }
+        Some([
+            (point.x - info.rcMonitor.left) as f64,
+            (point.y - info.rcMonitor.top) as f64,
+        ])
+    }
 }
 
 #[cfg(windows)]
 pub fn enumerate() -> Vec<Source> {
+    let _dpi = PhysicalCoordinates::enter();
     use windows_sys::Win32::{Foundation::*, Graphics::Gdi::*, UI::WindowsAndMessaging::*};
     unsafe extern "system" fn monitor(
         handle: HMONITOR,
@@ -65,22 +118,53 @@ pub fn enumerate() -> Vec<Source> {
             ),
             width: (rect.right - rect.left) as u32,
             height: (rect.bottom - rect.top) as u32,
+            minimized: false,
         });
         1
     }
     unsafe extern "system" fn window(handle: HWND, data: LPARAM) -> i32 {
         unsafe {
-            if IsWindowVisible(handle) == 0 || IsIconic(handle) != 0 {
+            if IsWindowVisible(handle) == 0 {
+                return 1;
+            }
+            use windows_sys::Win32::Graphics::Dwm::*;
+            let mut cloaked = 0u32;
+            if DwmGetWindowAttribute(
+                handle,
+                DWMWA_CLOAKED as u32,
+                (&mut cloaked as *mut u32).cast(),
+                4,
+            ) >= 0
+                && cloaked != 0
+            {
                 return 1;
             }
             let mut title = [0u16; 512];
             let len = GetWindowTextW(handle, title.as_mut_ptr(), title.len() as i32);
             let mut rect = RECT::default();
-            if len <= 0
-                || GetClientRect(handle, &mut rect) == 0
-                || rect.right < 2
-                || rect.bottom < 2
-            {
+            if len <= 0 || GetWindowRect(handle, &mut rect) == 0 {
+                return 1;
+            }
+            let minimized = IsIconic(handle) != 0;
+            if minimized {
+                let mut placement: WINDOWPLACEMENT = std::mem::zeroed();
+                placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+                if GetWindowPlacement(handle, &mut placement) != 0 {
+                    rect = placement.rcNormalPosition;
+                }
+            } else {
+                let mut visible = RECT::default();
+                if DwmGetWindowAttribute(
+                    handle,
+                    DWMWA_EXTENDED_FRAME_BOUNDS as u32,
+                    (&mut visible as *mut RECT).cast(),
+                    std::mem::size_of::<RECT>() as u32,
+                ) >= 0
+                {
+                    rect = visible;
+                }
+            }
+            if rect.right - rect.left < 2 || rect.bottom - rect.top < 2 {
                 return 1;
             }
             let list = &mut *(data as *mut Vec<Source>);
@@ -88,8 +172,9 @@ pub fn enumerate() -> Vec<Source> {
                 id: handle as usize as u64,
                 kind: "window",
                 name: String::from_utf16_lossy(&title[..len as usize]),
-                width: rect.right as u32,
-                height: rect.bottom as u32,
+                width: (rect.right - rect.left) as u32,
+                height: (rect.bottom - rect.top) as u32,
+                minimized,
             });
             1
         }

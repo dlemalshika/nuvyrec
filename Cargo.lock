@@ -204,6 +204,7 @@ version = "0.1.0"
 name = "recorder-engine"
 version = "0.1.0"
 dependencies = [
+ "cc",
  "ffmpeg-sys-next",
  "libc",
  "recorder-api",

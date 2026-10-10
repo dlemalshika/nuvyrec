@@ -1,0 +1,172 @@
+"""Verify full-window WGC preview/recording and live GPU cropping.
+
+Creates only an owned, synthetic, non-activating Win32 window. Never captures
+another application's contents, moves the pointer, or changes another window.
+Pass --library and --pan-probe built against the bundled FFmpeg 8.1 SDK.
+"""
+import argparse
+import ctypes as c
+from ctypes import wintypes as w
+import json
+import os
+from pathlib import Path
+import subprocess
+import threading
+import time
+import uuid
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--library', type=Path, required=True)
+parser.add_argument('--pan-probe', type=Path, required=True)
+args = parser.parse_args()
+root = Path(__file__).resolve().parent.parent
+sdk = root / '.deps/ffmpeg/ffmpeg-8.1.2-full_build-shared/bin'
+search = os.add_dll_directory(str(sdk))
+os.environ['PATH'] = str(sdk) + os.pathsep + os.environ['PATH']
+user = c.WinDLL('user32', use_last_error=True)
+gdi = c.WinDLL('gdi32', use_last_error=True)
+kernel = c.WinDLL('kernel32', use_last_error=True)
+PROC = c.WINFUNCTYPE(c.c_ssize_t, w.HWND, w.UINT, w.WPARAM, w.LPARAM)
+class WindowClass(c.Structure):
+    _fields_ = [('style',w.UINT),('proc',PROC),('class_extra',c.c_int),('window_extra',c.c_int),
+                ('instance',w.HINSTANCE),('icon',w.HICON),('cursor',w.HANDLE),('background',w.HBRUSH),
+                ('menu',w.LPCWSTR),('name',w.LPCWSTR)]
+user.DefWindowProcW.argtypes = [w.HWND,w.UINT,w.WPARAM,w.LPARAM]
+user.DefWindowProcW.restype = c.c_ssize_t
+user.CreateWindowExW.argtypes = [w.DWORD,w.LPCWSTR,w.LPCWSTR,w.DWORD,c.c_int,c.c_int,c.c_int,c.c_int,w.HWND,w.HMENU,w.HINSTANCE,c.c_void_p]
+user.CreateWindowExW.restype = w.HWND
+user.GetDC.argtypes=[w.HWND]; user.GetDC.restype=w.HDC
+user.ReleaseDC.argtypes=[w.HWND,w.HDC]
+user.FillRect.argtypes=[w.HDC,c.POINTER(w.RECT),w.HBRUSH]
+user.InvalidateRect.argtypes=[w.HWND,c.c_void_p,w.BOOL]
+user.ValidateRect.argtypes=[w.HWND,c.c_void_p]
+user.PostMessageW.argtypes=[w.HWND,w.UINT,w.WPARAM,w.LPARAM]
+user.ShowWindow.argtypes=[w.HWND,c.c_int]
+user.DestroyWindow.argtypes=[w.HWND]
+user.SetTimer.argtypes=[w.HWND,c.c_size_t,w.UINT,c.c_void_p]
+user.SetThreadDpiAwarenessContext.argtypes=[c.c_void_p]
+kernel.GetModuleHandleW.argtypes=[w.LPCWSTR];kernel.GetModuleHandleW.restype=w.HMODULE
+gdi.CreateSolidBrush.argtypes=[w.DWORD];gdi.CreateSolidBrush.restype=w.HBRUSH
+gdi.DeleteObject.argtypes=[w.HGDIOBJ]
+ready=threading.Event()
+fixture={}
+@PROC
+def procedure(hwnd,message,wp,lp):
+    if message==0x000f:  # WM_PAINT; colored quadrants reach every client edge
+        dc=user.GetDC(hwnd)
+        for rectangle,color in [((0,0,320,360),0x000000ff),((320,0,640,360),0x00ff0000),
+                                ((0,280,80,360),0x0000ff00),((560,280,640,360),0x0000ffff)]:
+            brush=gdi.CreateSolidBrush(color)
+            user.FillRect(dc,c.byref(w.RECT(*rectangle)),brush)
+            gdi.DeleteObject(brush)
+        user.ReleaseDC(hwnd,dc)
+        user.ValidateRect(hwnd,None)
+        return 0
+    if message==0x0113:
+        user.InvalidateRect(hwnd,None,False)
+        return 0
+    if message==0x0010:
+        user.DestroyWindow(hwnd)
+        return 0
+    if message==0x0002:
+        user.PostQuitMessage(0)
+        return 0
+    return user.DefWindowProcW(hwnd,message,wp,lp)
+def window_thread():
+    user.SetThreadDpiAwarenessContext(c.c_void_p(-4))
+    instance=kernel.GetModuleHandleW(None)
+    name='FrameOwnedCaptureFixture'+uuid.uuid4().hex
+    cls=WindowClass(0,procedure,0,0,instance,None,None,None,None,name)
+    if not user.RegisterClassW(c.byref(cls)): raise c.WinError(c.get_last_error())
+    style=0x00cf0000
+    rect=w.RECT(0,0,640,360)
+    user.AdjustWindowRect(c.byref(rect),style,False)
+    hwnd=user.CreateWindowExW(0x08000000,name,'Frame synthetic capture fixture',style,
+                              80,80,rect.right-rect.left,rect.bottom-rect.top,None,None,instance,None)
+    if not hwnd: raise c.WinError(c.get_last_error())
+    fixture['hwnd']=hwnd
+    user.ShowWindow(hwnd,4) # SW_SHOWNOACTIVATE
+    user.SetTimer(hwnd,1,30,None)
+    ready.set()
+    msg=w.MSG()
+    while user.GetMessageW(c.byref(msg),None,0,0)>0:
+        user.TranslateMessage(c.byref(msg)); user.DispatchMessageW(c.byref(msg))
+thread=threading.Thread(target=window_thread,daemon=True)
+thread.start()
+assert ready.wait(5),'Fixture window failed to initialize'
+library=c.CDLL(str(args.library.resolve()))
+for name in ['recorder_sources_json','recorder_status_json']:
+    getattr(library,name).restype=c.c_void_p
+for name in ['recorder_command_json','recorder_preview_request_json']:
+    getattr(library,name).argtypes=[c.c_char_p];getattr(library,name).restype=c.c_void_p
+library.recorder_string_free.argtypes=[c.c_void_p]
+library.recorder_preview_png.argtypes=[c.POINTER(c.c_size_t)];library.recorder_preview_png.restype=c.c_void_p
+library.recorder_preview_free.argtypes=[c.c_void_p,c.c_size_t]
+def read(pointer):
+    assert pointer
+    try: return json.loads(c.string_at(pointer).decode())
+    finally: library.recorder_string_free(pointer)
+def command(action,config=None):
+    return read(library.recorder_command_json(json.dumps({'action':action,**({'config':config} if config else {})}).encode()))
+directory=root/'artifacts'/('window-fixture-'+uuid.uuid4().hex)
+directory.mkdir()
+def rgb(path):
+    data=subprocess.check_output([str(sdk/'ffmpeg.exe'),'-v','error','-i',str(path),'-vf','scale=160:180','-frames:v','1','-f','rawvideo','-pix_fmt','rgb24','-'])
+    assert len(data)==160*180*3
+    return lambda x,y: tuple(data[(y*160+x)*3:(y*160+x)*3+3])
+def is_red(p):return p[0]>180 and p[1]<80 and p[2]<80
+def is_blue(p):return p[2]>180 and p[0]<80 and p[1]<80
+try:
+    source=next(s for s in read(library.recorder_sources_json())['sources'] if s['kind']=='window' and s['id']==fixture['hwnd'])
+    assert not source['minimized'] and source['width']>=640 and source['height']>360
+    config=dict(output=str(directory/'full-window.mkv'),container='mkv',source_kind='window',source_id=source['id'],
+                width=source['width']//2*2,height=source['height']//2*2,fps=30,bitrate=2_000_000,encoder='libx264')
+    response=command('start',config);assert response['ok'],response
+    deadline=time.monotonic()+12
+    while time.monotonic()<deadline:
+        status=read(library.recorder_status_json())
+        if status['state']=='failed':raise RuntimeError(status['error'])
+        if status['state']=='recording' and status['seconds']>1:break
+        time.sleep(.1)
+    else:raise RuntimeError('Owned window did not record')
+    assert command('stop')['ok']
+    deadline=time.monotonic()+10
+    while time.monotonic()<deadline and read(library.recorder_status_json())['state']!='stopped':time.sleep(.1)
+    assert read(library.recorder_status_json())['state']=='stopped'
+    # Source-size aspect thumbnail, returned independently of the media thread.
+    ratio=min(480/source['width'],270/source['height'])
+    request=dict(id=source['id'],width=round(source['width']*ratio),height=round(source['height']*ratio))
+    deadline=time.monotonic()+8
+    while time.monotonic()<deadline:
+        response=read(library.recorder_preview_request_json(json.dumps(request).encode()))
+        assert response['ok'],response
+        length=c.c_size_t()
+        pointer=library.recorder_preview_png(c.byref(length))
+        if pointer:
+            try:(directory/'preview.png').write_bytes(c.string_at(pointer,length.value))
+            finally:library.recorder_preview_free(pointer,length.value)
+            break
+        time.sleep(.2)
+    else:raise RuntimeError('Window thumbnail did not arrive')
+    for path in [directory/'preview.png',directory/'full-window.mkv']:
+        pixel=rgb(path)
+        assert is_red(pixel(40,80)) and is_blue(pixel(120,80)),str(path)
+        assert pixel(8,165)[1]>180 and pixel(152,165)[0]>180 and pixel(152,165)[1]>180,'Bottom corners were cropped'
+        assert not is_red(pixel(40,3)),'Title bar missing'
+    user.ShowWindow(fixture['hwnd'],6)
+    time.sleep(.3)
+    minimized=next(s for s in read(library.recorder_sources_json())['sources'] if s['id']==source['id'] and s['kind']=='window')
+    assert minimized['minimized']
+    config['output']=str(directory/'must-not-exist.mkv')
+    assert not command('start',config)['ok']
+    assert not Path(config['output']).exists()
+    user.ShowWindow(fixture['hwnd'],4)
+    time.sleep(.3)
+    subprocess.run([str(args.pan_probe.resolve()),str(fixture['hwnd']),str(directory)],check=True)
+    assert is_red(rgb(directory/'pan-left.png')(80,80)),'Left GPU crop incorrect'
+    assert is_blue(rgb(directory/'pan-right.png')(80,80)),'Live GPU panning did not change the crop'
+    print(json.dumps({'result':'passed','full_window':True,'native_preview':True,'minimized_rejected':True,'same_graph_pan':True,'fixture_artifacts':str(directory)}))
+finally:
+    command('stop')
+    user.PostMessageW(fixture['hwnd'],0x0010,0,0)
+    thread.join(3)

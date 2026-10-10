@@ -44,6 +44,9 @@ impl AudioControls {
 fn enabled() -> bool {
     true
 }
+fn shortcut_seconds() -> u32 {
+    2
+}
 fn manual_mode() -> String {
     "manual".into()
 }
@@ -77,7 +80,7 @@ impl Default for WebcamRequest {
     }
 }
 impl WebcamRequest {
-    fn placement(&self) -> recorder_engine::webcam::Placement {
+    pub(crate) fn placement(&self) -> recorder_engine::webcam::Placement {
         recorder_engine::webcam::Placement {
             x: self.x,
             y: self.y,
@@ -156,6 +159,8 @@ pub struct Request {
     #[serde(default)]
     pub region: Option<[u32; 4]>,
     #[serde(default)]
+    pub follow_mouse: bool,
+    #[serde(default)]
     pub system_device: String,
     #[serde(default)]
     pub microphone_device: String,
@@ -182,6 +187,14 @@ pub struct Request {
     #[serde(default)]
     pub annotations_enabled: bool,
     #[serde(default)]
+    pub layers_enabled: bool,
+    #[serde(default)]
+    pub shortcut_overlay: bool,
+    #[serde(default = "shortcut_seconds")]
+    pub shortcut_seconds: u32,
+    #[serde(default)]
+    pub shortcut_right: bool,
+    #[serde(default)]
     pub cursor_highlight: bool,
     #[serde(default)]
     pub click_effects: bool,
@@ -204,6 +217,8 @@ pub struct Worker {
     pub replay_request: Arc<Mutex<Option<String>>>,
     pub annotations: Arc<Mutex<Vec<recorder_engine::overlay::Annotation>>>,
     pub reduce_quality: Arc<AtomicBool>,
+    pub webcam_visible: Arc<AtomicBool>,
+    pub webcam_available: bool,
 }
 
 impl Worker {
@@ -215,6 +230,15 @@ impl Worker {
             .into_iter()
             .find(|s| s.id == request.source_id && s.kind == request.source_kind)
             .ok_or("Capture source no longer exists; refresh the source list")?;
+        if source.minimized {
+            return Err("Restore the selected window before recording".into());
+        }
+        if request.shortcut_overlay && !(1..=5).contains(&request.shortcut_seconds) {
+            return Err("Shortcut display duration must be 1–5 seconds".into());
+        }
+        if request.follow_mouse && request.region.is_none() {
+            return Err("Follow mouse requires a region on the selected display".into());
+        }
         if !["auto", "libx264", "h264_nvenc", "h264_amf", "h264_qsv"]
             .contains(&request.encoder.as_str())
         {
@@ -262,6 +286,8 @@ impl Worker {
             return Err("Recovery segments require MKV and a 2–3600 second interval".into());
         }
         if (request.annotations_enabled
+            || request.layers_enabled
+            || request.shortcut_overlay
             || request.cursor_highlight
             || request.click_effects
             || request.webcam.enabled)
@@ -315,6 +341,9 @@ impl Worker {
         let worker_annotations = annotations.clone();
         let reduce_quality = Arc::new(AtomicBool::new(false));
         let worker_quality = reduce_quality.clone();
+        let webcam_available = request.webcam.enabled;
+        let webcam_visible = Arc::new(AtomicBool::new(webcam_available));
+        let worker_webcam_visible = webcam_visible.clone();
         let thread = thread::Builder::new()
             .name("recorder-media".into())
             .spawn(move || {
@@ -330,6 +359,7 @@ impl Worker {
                         &worker_replay,
                         &worker_annotations,
                         &worker_quality,
+                        &worker_webcam_visible,
                     )
                 }));
                 let error = match result {
@@ -351,6 +381,8 @@ impl Worker {
             replay_request,
             annotations,
             reduce_quality,
+            webcam_visible,
+            webcam_available,
         })
     }
     pub fn finished(&self) -> bool {
@@ -396,7 +428,10 @@ fn run(
     replay_request: &Mutex<Option<String>>,
     annotations: &Mutex<Vec<recorder_engine::overlay::Annotation>>,
     reduce_quality: &AtomicBool,
+    webcam_visible: &AtomicBool,
 ) -> Result<(), String> {
+    #[cfg(windows)]
+    let _dpi = sources::PhysicalCoordinates::enter();
     #[cfg(windows)]
     let _apartment = recorder_engine::wasapi::Apartment::initialize().map_err(|e| e.to_string())?;
     #[cfg(windows)]
@@ -465,10 +500,12 @@ fn run(
         ),
         None => String::new(),
     };
-    let cursor = u8::from(request.capture_cursor);
+    let cursor = u8::from(request.capture_cursor || request.follow_mouse);
     let candidates: Vec<&str> = if request.container == "gif" {
         vec!["gif"]
     } else if request.annotations_enabled
+        || request.layers_enabled
+        || request.shortcut_overlay
         || request.cursor_highlight
         || request.click_effects
         || request.webcam.enabled
@@ -543,7 +580,11 @@ fn run(
     } else {
         None
     };
-    let mut last_screen = if camera.is_some() {
+    let repeat_overlays = camera.is_some()
+        || request.layers_enabled
+        || request.shortcut_overlay
+        || request.annotations_enabled;
+    let mut last_screen = if repeat_overlays {
         Some(first.try_clone().map_err(|e| e.to_string())?)
     } else {
         None
@@ -556,6 +597,16 @@ fn run(
     if let Ok(mut value) = status.lock() {
         value["fallback_reasons"] = json!(failures);
         value["annotations_enabled"] = json!(request.annotations_enabled);
+        value["layers_enabled"] = json!(request.layers_enabled);
+        value["shortcut_overlay"] = json!(request.shortcut_overlay);
+        value["shortcut_right"] = json!(request.shortcut_right);
+        value["webcam_available"] = json!(request.webcam.enabled);
+        value["webcam_visible"] = json!(request.webcam.enabled);
+    }
+    if request.layers_enabled {
+        first
+            .raster_layers(&crate::layers::snapshot()?)
+            .map_err(|e| e.to_string())?;
     }
     session
         .write_video(&mut first, 0)
@@ -603,6 +654,13 @@ fn run(
         Some(frames),
         Some(0.0),
     );
+    let mut current_region = request.region;
+    let mut viewport = request
+        .region
+        .map(|r| crate::follow::Viewport::new(r, [source.width, source.height]));
+    let mut last_pointer = Instant::now();
+    let mut shortcuts = crate::shortcuts::Tracker::new();
+    let mut last_shortcut_poll = Instant::now();
     while !stop.load(Ordering::Acquire) {
         let replay_path = replay_request
             .lock()
@@ -618,6 +676,24 @@ fn run(
                     }
                     Err(error) => value["replay_error"] = json!(error.to_string()),
                 }
+            }
+        }
+        #[cfg(windows)]
+        if request.follow_mouse && !pause.load(Ordering::Acquire) {
+            let now = Instant::now();
+            let region = viewport.as_mut().ok_or("Missing follow viewport")?.sample(
+                sources::local_pointer(source.id),
+                now.duration_since(last_pointer).as_secs_f64(),
+            );
+            last_pointer = now;
+            if current_region != Some(region) {
+                capture
+                    .pan_region(region, [source.width, source.height])
+                    .map_err(|e| e.to_string())?;
+                current_region = Some(region);
+            }
+            if let Ok(mut value) = status.lock() {
+                value["current_region"] = json!(region);
             }
         }
         let mut frame = capture.next_frame().map_err(|e| e.to_string())?;
@@ -689,6 +765,14 @@ fn run(
                         Capture::open(&capture_graph(&config, &encoder, &handle, &crop, cursor))
                             .map_err(|e| e.to_string())?;
                     let began = Instant::now();
+                    if request.follow_mouse {
+                        capture
+                            .pan_region(
+                                current_region.ok_or("Missing region")?,
+                                [source.width, source.height],
+                            )
+                            .map_err(|e| e.to_string())?;
+                    }
                     loop {
                         frame = capture.next_frame().map_err(|e| e.to_string())?;
                         if frame.is_some() {
@@ -749,7 +833,7 @@ fn run(
         #[cfg(windows)]
         let cursor =
             if source.kind == "display" && (request.cursor_highlight || request.click_effects) {
-                let position = sources::cursor_position(source.id, request.region);
+                let position = sources::cursor_position(source.id, current_region);
                 if request.click_effects {
                     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
                         GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON,
@@ -824,7 +908,21 @@ fn run(
             drain_mix(&mut session, bus, elapsed.as_secs_f64(), segment_start)?;
         }
         let pts = (elapsed.as_secs_f64() * f64::from(config.fps)).floor() as i64;
-        if camera.is_some() {
+        #[cfg(windows)]
+        let shortcut_layer = if request.shortcut_overlay {
+            if last_shortcut_poll.elapsed() >= Duration::from_millis(20) {
+                shortcuts.sample(
+                    crate::shortcuts::current(),
+                    request.shortcut_seconds,
+                    request.shortcut_right,
+                );
+                last_shortcut_poll = Instant::now();
+            }
+            shortcuts.layer()
+        } else {
+            None
+        };
+        if repeat_overlays {
             if let Some(base) = &frame {
                 last_screen = Some(base.try_clone().map_err(|e| e.to_string())?);
             }
@@ -840,7 +938,10 @@ fn run(
             if pts > last_pts {
                 skipped += (pts - last_pts - 1) as u64;
                 let encoding_started = Instant::now();
-                if let Some(camera) = &camera {
+                if let Some(camera) = camera
+                    .as_ref()
+                    .filter(|_| webcam_visible.load(Ordering::Acquire))
+                {
                     if let Ok(image) = camera.latest.lock() {
                         if let Some(image) = image
                             .as_ref()
@@ -855,6 +956,17 @@ fn run(
                 if request.annotations_enabled {
                     let marks = annotations.lock().map_err(|_| "Annotation lock failed")?;
                     frame.annotate(&marks).map_err(|e| e.to_string())?;
+                }
+                if request.layers_enabled {
+                    frame
+                        .raster_layers(&crate::layers::snapshot()?)
+                        .map_err(|e| e.to_string())?;
+                }
+                #[cfg(windows)]
+                if let Some(layer) = &shortcut_layer {
+                    frame
+                        .raster_layers(std::slice::from_ref(layer))
+                        .map_err(|e| e.to_string())?;
                 }
                 #[cfg(windows)]
                 {
@@ -896,9 +1008,15 @@ fn run(
             thread::sleep(Duration::from_millis(2));
         }
         if last_event.elapsed() >= Duration::from_millis(200) {
+            if request.shortcut_overlay {
+                if let Ok(mut value) = status.lock() {
+                    value["shortcut_label"] = json!(shortcuts.label());
+                }
+            }
             if let Some(camera) = &camera {
                 if let Ok(mut value) = status.lock() {
                     value["webcam_error"] = json!(camera.error.lock().ok().and_then(|v| v.clone()));
+                    value["webcam_visible"] = json!(webcam_visible.load(Ordering::Acquire));
                     value["webcam_ready"] = json!(camera.latest.lock().ok().is_some_and(|v| v
                         .as_ref()
                         .is_some_and(|image| image.captured.elapsed() < Duration::from_secs(2))));
@@ -1011,7 +1129,7 @@ fn capture_graph(
 ) -> String {
     // Scale the BGRA GPU canvas before any readback. A 4K source recorded at
     // 720p transfers only the 720p canvas to RAM on software/QSV paths.
-    let source=format!("gfxcapture={handle}:max_framerate={}:width={}:height={}:capture_cursor={cursor}:resize_mode=scale_aspect{crop}",config.fps,config.width,config.height);
+    let source=format!("gfxcapture={handle}:capture_border=1:max_framerate={}:width={}:height={}:capture_cursor={cursor}:resize_mode=scale_aspect{crop}",config.fps,config.width,config.height);
     match name {
         "libx264" => format!("{source},hwdownload,format=bgra,format=yuv420p"),
         "h264_qsv" => format!("{source},hwdownload,format=bgra,format=nv12"),

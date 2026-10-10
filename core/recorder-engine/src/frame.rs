@@ -10,6 +10,64 @@ pub struct VideoFrame {
 }
 
 impl VideoFrame {
+    /// Encodes a small CPU RGBA thumbnail. Recording frames never use this API.
+    pub fn thumbnail_png(&self) -> Result<Vec<u8>> {
+        unsafe {
+            if (*self.raw).format != av::AVPixelFormat::AV_PIX_FMT_RGBA as i32
+                || (*self.raw).width > 480
+                || (*self.raw).height > 270
+            {
+                return Err(Error::Invalid("PNG thumbnail requires bounded RGBA"));
+            }
+            struct Encoder {
+                context: *mut av::AVCodecContext,
+                packet: *mut av::AVPacket,
+            }
+            impl Drop for Encoder {
+                fn drop(&mut self) {
+                    unsafe {
+                        av::av_packet_free(&mut self.packet);
+                        av::avcodec_free_context(&mut self.context);
+                    }
+                }
+            }
+            let codec = av::avcodec_find_encoder(av::AVCodecID::AV_CODEC_ID_PNG);
+            if codec.is_null() {
+                return Err(Error::State("PNG encoder unavailable"));
+            }
+            let encoder = Encoder {
+                context: av::avcodec_alloc_context3(codec),
+                packet: av::av_packet_alloc(),
+            };
+            if encoder.context.is_null() || encoder.packet.is_null() {
+                return Err(Error::Allocation("PNG encoder allocation"));
+            }
+            (*encoder.context).width = (*self.raw).width;
+            (*encoder.context).height = (*self.raw).height;
+            (*encoder.context).pix_fmt = av::AVPixelFormat::AV_PIX_FMT_RGBA;
+            (*encoder.context).time_base = av::AVRational { num: 1, den: 1 };
+            (*encoder.context).thread_count = 1;
+            check(
+                av::avcodec_open2(encoder.context, codec, ptr::null_mut()),
+                "open thumbnail encoder",
+            )?;
+            check(
+                av::avcodec_send_frame(encoder.context, self.raw),
+                "encode thumbnail",
+            )?;
+            check(
+                av::avcodec_receive_packet(encoder.context, encoder.packet),
+                "receive thumbnail",
+            )?;
+            if (*encoder.packet).size <= 0 || (*encoder.packet).size > 2 * 1024 * 1024 {
+                return Err(Error::Invalid("invalid thumbnail size"));
+            }
+            Ok(
+                std::slice::from_raw_parts((*encoder.packet).data, (*encoder.packet).size as usize)
+                    .to_vec(),
+            )
+        }
+    }
     /// Reference-counted clone; compositors call make_writable before mutation.
     pub fn try_clone(&self) -> Result<Self> {
         let raw = unsafe { av::av_frame_clone(self.raw) };

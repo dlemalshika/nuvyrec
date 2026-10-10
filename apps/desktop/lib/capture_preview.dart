@@ -36,7 +36,11 @@ class _CapturePreviewState extends State<CapturePreview>
   @override
   void didUpdateWidget(CapturePreview oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.source.toString() != widget.source.toString() ||
+    String identity(Map<String, dynamic>? s) =>
+        '${s?['id']}:${s?['kind']}:${s?['frame_width']}:${s?['frame_height']}';
+    // A moving region changes coordinates frequently. Read its latest position
+    // on the existing one-second timer instead of triggering extra captures.
+    if (identity(oldWidget.source) != identity(widget.source) ||
         oldWidget.enabled != widget.enabled) {
       _generation++;
       _discardImage();
@@ -66,7 +70,10 @@ class _CapturePreviewState extends State<CapturePreview>
         'capturePreview',
         widget.source,
       );
-      if (mounted && generation == _generation) {
+      if (image != null &&
+          image.isNotEmpty &&
+          mounted &&
+          generation == _generation) {
         setState(() {
           _discardImage();
           _image = image;
