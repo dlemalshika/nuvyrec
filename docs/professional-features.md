@@ -1,7 +1,29 @@
 # Professional recorder feature candidates
 
-Research date: 2026-10-10. These are proposed additions, not implemented features.
+Research date: 2026-10-10. The research tables below describe the target product.
+The implementation status is recorded separately here and in release-status.md.
 Priorities are recommendations for Frame's lightweight recorder focus.
+
+## Current implementation status
+
+| Capability | Windows feature alpha |
+|---|---|
+| Hotkeys/tray, drag region, countdown | Implemented; native compilation/startup checked; drag interaction needs manual testing |
+| Audio endpoints, gain/mute, meters, mix | Implemented; actual three-track capture and DSP verified |
+| Quality presets, schedules, auto-stop | Implemented; schedules require Frame open; duration stop verified |
+| Library, screenshots, remux, trim/crop | Implemented; synthetic export/probe/decode tests passed |
+| Replay history | Implemented; bounded encoded-packet history, MKV save, keyframe/timestamp tests |
+| Recovery segmentation | Implemented for MKV; finalized parts retained; current part not guaranteed |
+| Drawing/arrows/boxes/spotlight | Implemented in preview; recorded CPU compositor verified; text pending |
+| Cursor highlight/click rings | Implemented for display/region, software path; keystroke overlay pending |
+| Webcam/chroma key, scenes/source layers | Pending |
+| Streaming/reconnect, automatic captions/smart zoom | Pending |
+| Adaptive quality, HEVC/AV1/HDR | Pending |
+| macOS, Android, iOS | Native capture integration pending |
+
+Optional CPU effects are off by default. Enable them before recording; audio
+gain and mute can change live. Configurations/quality presets and library
+metadata persist per user. Scheduled starts are deliberately session-only.
 
 ## First priority: everyday recording and reliability
 

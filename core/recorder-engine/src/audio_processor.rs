@@ -220,10 +220,9 @@ impl AudioMixer {
             return Err(Error::Invalid("invalid mixer clock"));
         }
         let target = (clock * 48000.0).floor() as u64;
-        let frames = target.saturating_sub(self.emitted);
-        if frames > 48000 {
-            return Err(Error::State("mixer clock jumped more than one second"));
-        }
+        // A slow GPU or disk may stall capture for >1s. Catch up with bounded
+        // chunks rather than terminating an otherwise valid recording.
+        let frames = target.saturating_sub(self.emitted).min(48000);
         let mut mixed = Vec::with_capacity(frames as usize * 2);
         for _ in 0..frames * 2 {
             let sum: f32 = self
@@ -233,8 +232,11 @@ impl AudioMixer {
                 .sum();
             mixed.push(sum.clamp(-0.95, 0.95));
         }
-        self.emitted = target;
+        self.emitted += frames;
         Ok(mixed)
+    }
+    pub fn clock(&self) -> f64 {
+        self.emitted as f64 / 48000.0
     }
 }
 
@@ -260,5 +262,14 @@ mod tests {
         let samples = mix.until(2.0 / 48000.0).unwrap();
         assert_eq!(samples, vec![0.95, 0.95, 0.5, 0.5]);
         assert!(mix.push(0, &vec![0.0; 96002]).is_err());
+    }
+    #[test]
+    fn mixer_catches_up_after_stall_in_bounded_chunks() {
+        let mut mixer = AudioMixer::new(2).unwrap();
+        assert_eq!(mixer.until(2.5).unwrap().len(), 96000);
+        assert_eq!(mixer.until(2.5).unwrap().len(), 96000);
+        assert_eq!(mixer.until(2.5).unwrap().len(), 48000);
+        assert!(mixer.until(2.5).unwrap().is_empty());
+        assert_eq!(mixer.clock(), 2.5);
     }
 }

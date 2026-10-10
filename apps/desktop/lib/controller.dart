@@ -133,6 +133,7 @@ class RecorderController extends ChangeNotifier {
         preferences = Map<String, dynamic>.from(decoded);
         library = (preferences['library'] as List? ?? [])
             .whereType<Map>()
+            .where((v) => v['path'] is String && v['seconds'] is num)
             .map((v) => Map<String, dynamic>.from(v))
             .take(1000)
             .toList();
@@ -161,14 +162,25 @@ class RecorderController extends ChangeNotifier {
     }
     final path = status['output'] as String;
     _indexedOutput = path;
-    if (File(path).existsSync() && !library.any((r) => r['path'] == path)) {
+    final outputs = (status['outputs'] as List? ?? [path]).whereType<String>();
+    bool indexed = false;
+    for (final path in outputs) {
+      if (!File(path).existsSync() || library.any((r) => r['path'] == path)) {
+        continue;
+      }
+      indexed = true;
       library.insert(0, {
         'path': path,
         'date': DateTime.now().toIso8601String(),
-        'seconds': status['seconds'] ?? 0,
+        'seconds':
+            (status['segment_durations'] as Map?)?[path] ??
+            status['seconds'] ??
+            0,
         'frames': status['frames'] ?? 0,
       });
       if (library.length > 1000) library.removeLast();
+    }
+    if (indexed) {
       savePreferences();
       notice = 'Recording saved';
     }

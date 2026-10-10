@@ -1,12 +1,12 @@
 # Frame — native screen recorder
 
-Frame 0.2 is a working **Windows alpha** with a Rust/FFmpeg engine and a native
+Frame is a working **Windows feature alpha** with a Rust/FFmpeg engine and a native
 Flutter desktop interface. The original four-platform professional specification
 is still in progress; see [release status](docs/release-status.md) for exact gaps.
 
 ## Run the local Windows build
 
-Open the latest UI build at `artifacts/Frame-Windows-Themes/Frame.exe`. Keep the entire folder together: Flutter
+Open the latest build at `artifacts/Frame-Windows-Features/Frame.exe`. Keep the entire folder together: Flutter
 assets, recorder_core.dll and the matching FFmpeg runtime DLLs are required.
 Choose a display, window or display region, choose a new output file, then record.
 The main workspace shows a live thumbnail preview. Open **Settings** for video,
@@ -18,7 +18,7 @@ recording asks to stop and finalize first.
 
 ## Current features
 
-- Full display, window and numeric custom-region capture through native WGC.
+- Full display/window capture, numeric regions and native drag-to-select regions.
 - MP4/MKV/AVI H.264 recording and animated GIF at up to 720p/15 fps.
 - Native system-audio and microphone capture saved as separate AAC tracks.
 - Automatic NVENC → AMF → Quick Sync → software encoder negotiation.
@@ -28,12 +28,22 @@ recording asks to stop and finalize first.
   an off toggle and automatic suspension while the app is minimized.
 - Native file dialogs, output reveal, status/timer and safe recording shutdown.
 - Atomic refusal to overwrite existing recordings.
+- Global hotkeys/tray controls, countdown, saved quality presets and scheduled start.
+- Device selection, live audio meters/gain/mute, optional mixed playback track,
+  microphone noise suppression/gate and limiter.
+- Duration/file-size auto-stop, optional finalized MKV recovery segments.
+- Encoded replay buffer with an explicit memory budget and MKV replay export.
+- Draw/arrow/box/spotlight annotations; display/region cursor highlight/click effects.
+  These effects use software encoding and are off by default.
+- Local recording library/import/playback, PNG screenshots, MP4 remux, trim/crop
+  exports with progress/cancellation and protected app shutdown during export.
 
 Selecting an encoder is not a guarantee of device support. This machine recorded
 with Quick Sync and software encoding; its driver rejected the NVENC/AMF GPU
 texture path. Automatic fallback reasons are retained in native session status.
 GIF uses a basic fixed palette and contains no audio. Multi-track players may play
-only one audio track by default; a combined mix track is not implemented yet.
+only one audio track by default. With both sources enabled, the optional combined
+track is written first and separate source tracks follow.
 
 ## Build and test
 
@@ -45,8 +55,8 @@ See [build instructions](docs/build.md). On the prepared local workspace:
 ./tools/package-windows.ps1
 ```
 
-Packaging defaults to `artifacts/Frame-Windows`. To recreate the preview build
-alongside an open app, use `./tools/package-windows.ps1 -BundleName Frame-Windows-Themes`.
+Packaging defaults to `artifacts/Frame-Windows`. To recreate the feature build
+alongside an open app, use `./tools/package-windows.ps1 -BundleName Frame-Windows-Features`.
 
 The original [architecture plan](docs/architecture.md) explains the target
 monorepo, media ownership and future platform integrations. The current code adds
@@ -56,9 +66,11 @@ has no capture backend; Android/iOS are not implemented.
 
 ## Remaining work
 
-Webcam/chroma-key and annotations, adaptive quality, mix bus and long-duration
-sync, full GPU Quick Sync interop, macOS/Android/iOS backends, full-rate GPU preview,
-recovery/export, signed installers and sustained low-end/4K120 validation remain.
+Webcam/chroma key, Unicode text/keystroke overlays, scene/source layers, streaming,
+automatic captions/smart zoom, adaptive quality, HEVC/AV1/HDR, long-duration sync,
+full GPU Quick Sync interop, macOS/Android/iOS backends, full-rate GPU preview,
+fault-injection recovery testing, signed installers and sustained low-end/4K120
+validation remain. See [feature status](docs/professional-features.md).
 This alpha is not an OBS/Bandicam-equivalent production release.
 
 ## License

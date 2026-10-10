@@ -42,6 +42,9 @@ try {
     New-Item -ItemType Directory -Path $noticeRoot -Force | Out-Null
     Copy-Item -Path "$env:FFMPEG_DIR\LICENSE*","$env:FFMPEG_DIR\README*" -Destination $noticeRoot -Force
     Copy-Item -LiteralPath (Join-Path $taskRoot 'README.md') -Destination $bundleRoot -Force
+    $documentationRoot = Join-Path $bundleRoot 'docs'
+    New-Item -ItemType Directory -Path $documentationRoot -Force | Out-Null
+    Copy-Item -Path (Join-Path $taskRoot 'docs\*.md') -Destination $documentationRoot -Force
     $manifest = Get-ChildItem -LiteralPath $bundleRoot -File -Recurse | Where-Object { $_.FullName -ne (Join-Path $bundleRoot 'manifest.json') } | ForEach-Object {
         [pscustomobject]@{ path = [System.IO.Path]::GetRelativePath($bundleRoot, $_.FullName); sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower() }
     }

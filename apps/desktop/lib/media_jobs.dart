@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 /// Optional local export tools. Capture continues to use the Rust FFmpeg library.
 /// Arguments are passed directly to the executable; no shell is involved.
 class MediaJobs extends ChangeNotifier {
+  MediaJobs({String? toolsDirectory}) : _toolsDirectory = toolsDirectory;
+  final String? _toolsDirectory;
   Process? _process;
   bool _disposed = false;
   bool busy = false, cancelled = false;
@@ -18,7 +20,8 @@ class MediaJobs extends ChangeNotifier {
   }
 
   void notifyJobChanged() => notifyListeners();
-  String get _tools => File(Platform.resolvedExecutable).parent.path;
+  String get _tools =>
+      _toolsDirectory ?? File(Platform.resolvedExecutable).parent.path;
   String executable(String name) => '$_tools${Platform.pathSeparator}$name.exe';
   Future<Map<String, dynamic>> probe(String path) async {
     if (!await File(path).exists()) {
@@ -141,6 +144,7 @@ class MediaJobs extends ChangeNotifier {
         runInShell: false,
       );
       _process = process;
+      if (cancelled) cancel();
       final stderr = process.stderr.transform(utf8.decoder).listen((text) {
         errors += text;
         if (errors.length > 4000) {

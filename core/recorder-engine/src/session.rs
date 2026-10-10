@@ -250,6 +250,12 @@ impl RecordingSession {
 
     /// Consume the session so it can never accept frames after finalization.
     pub fn finish(mut self) -> Result<()> {
+        self.finalize()
+    }
+
+    /// Finish a segment while retaining a handle that rejects further writes.
+    /// This permits the worker to rotate to an independently playable file.
+    pub fn finalize(&mut self) -> Result<()> {
         if self.state != State::Ready {
             return Err(Error::State("cannot finalize a failed session"));
         }

@@ -136,6 +136,12 @@ pub struct Request {
     pub replay_mib: u32,
     #[serde(default)]
     pub annotations_enabled: bool,
+    #[serde(default)]
+    pub cursor_highlight: bool,
+    #[serde(default)]
+    pub click_effects: bool,
+    #[serde(default)]
+    pub segment_seconds: u32,
 }
 
 pub struct Worker {
@@ -180,7 +186,12 @@ impl Worker {
         };
         config.validate().map_err(str::to_owned)?;
         request.audio_controls.validate()?;
-        if request.annotations_enabled
+        if request.segment_seconds != 0
+            && (!(2..=3600).contains(&request.segment_seconds) || request.container != "mkv")
+        {
+            return Err("Recovery segments require MKV and a 2–3600 second interval".into());
+        }
+        if (request.annotations_enabled || request.cursor_highlight || request.click_effects)
             && (request.container == "gif"
                 || !["auto", "libx264"].contains(&request.encoder.as_str()))
         {
@@ -380,7 +391,7 @@ fn run(
     let base = format!("gfxcapture={handle}:max_framerate={}:capture_cursor={cursor}:resize_mode=scale_aspect{crop},scale_d3d11=width={}:height={}:format=nv12", config.fps, config.width, config.height);
     let candidates: Vec<&str> = if request.container == "gif" {
         vec!["gif"]
-    } else if request.annotations_enabled {
+    } else if request.annotations_enabled || request.cursor_highlight || request.click_effects {
         vec!["libx264"]
     } else if request.encoder == "auto" {
         vec!["h264_nvenc", "h264_amf", "h264_qsv", "libx264"]
@@ -464,6 +475,18 @@ fn run(
     let mut last_event = Instant::now();
     let mut skipped = 0u64;
     let mut encode_ms = 0.0f64;
+    let mut segment_start = 0.0f64;
+    let mut segment_number = 1u32;
+    let mut current_path = config.output.clone();
+    let mut finalized_bytes = 0u64;
+    if let Ok(mut value) = status.lock() {
+        value["outputs"] = json!([config.output]);
+        value["segment_durations"] = json!({});
+    }
+    #[cfg(windows)]
+    let mut mouse_down = false;
+    #[cfg(windows)]
+    let mut click: Option<([f32; 2], Instant)> = None;
     update(
         status,
         "recording",
@@ -509,6 +532,75 @@ fn run(
             update(status, "recording", None, None, None, None);
         }
         let elapsed = start.elapsed().saturating_sub(paused);
+        if request.segment_seconds > 0
+            && elapsed.as_secs_f64() - segment_start >= f64::from(request.segment_seconds)
+        {
+            if segment_number >= 1024 {
+                if let Ok(mut value) = status.lock() {
+                    value["stop_reason"] = json!("Maximum 1024 recovery segments reached");
+                }
+                break;
+            }
+            if let Some(ref first) = frame {
+                #[cfg(windows)]
+                if let Some(bus) = &mut mixer {
+                    drain_mix(&mut session, bus, elapsed.as_secs_f64(), segment_start)?;
+                }
+                session.finalize().map_err(|e| e.to_string())?;
+                if let Ok(mut value) = status.lock() {
+                    value["segment_durations"][current_path.to_string_lossy().as_ref()] =
+                        json!(elapsed.as_secs_f64() - segment_start);
+                }
+                finalized_bytes += current_path.metadata().map(|m| m.len()).unwrap_or(0);
+                segment_number += 1;
+                let mut filename = config
+                    .output
+                    .file_stem()
+                    .ok_or("Invalid recording filename")?
+                    .to_os_string();
+                filename.push(format!("-part{segment_number:04}.mkv"));
+                current_path = config.output.with_file_name(filename);
+                let mut next = config.clone();
+                next.output = current_path.clone();
+                session =
+                    RecordingSession::encoded_with_audio(&next, &encoder, first, &audio_rates)
+                        .map_err(|e| e.to_string())?;
+                if request.replay_seconds > 0 {
+                    session
+                        .enable_replay(request.replay_seconds, request.replay_mib)
+                        .map_err(|e| e.to_string())?;
+                }
+                segment_start = elapsed.as_secs_f64();
+                if let Ok(mut value) = status.lock() {
+                    value["current_output"] = json!(current_path);
+                    if let Some(outputs) = value["outputs"].as_array_mut() {
+                        outputs.push(json!(current_path));
+                    }
+                }
+            }
+        }
+        let segment_clock = elapsed.as_secs_f64() - segment_start;
+        #[cfg(windows)]
+        let cursor =
+            if source.kind == "display" && (request.cursor_highlight || request.click_effects) {
+                let position = sources::cursor_position(source.id, request.region);
+                if request.click_effects {
+                    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+                        GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON,
+                    };
+                    let down = unsafe {
+                        GetAsyncKeyState(i32::from(VK_LBUTTON)) < 0
+                            || GetAsyncKeyState(i32::from(VK_RBUTTON)) < 0
+                    };
+                    if down && !mouse_down {
+                        click = position.map(|p| (p, Instant::now()));
+                    }
+                    mouse_down = down;
+                }
+                position
+            } else {
+                None
+            };
         #[cfg(windows)]
         for (index, raw_samples) in audio_packets.iter().enumerate() {
             let mut samples = processors[index]
@@ -558,21 +650,12 @@ fn run(
                 bus.push(index, &samples).map_err(|e| e.to_string())?;
             }
             session
-                .write_audio(
-                    index + usize::from(mix_enabled),
-                    &samples,
-                    elapsed.as_secs_f64(),
-                )
+                .write_audio(index + usize::from(mix_enabled), &samples, segment_clock)
                 .map_err(|e| e.to_string())?;
         }
         #[cfg(windows)]
         if let Some(bus) = &mut mixer {
-            let combined = bus
-                .until(elapsed.as_secs_f64())
-                .map_err(|e| e.to_string())?;
-            session
-                .write_audio(0, &combined, elapsed.as_secs_f64())
-                .map_err(|e| e.to_string())?;
+            drain_mix(&mut session, bus, elapsed.as_secs_f64(), segment_start)?;
         }
         let pts = (elapsed.as_secs_f64() * f64::from(config.fps)).floor() as i64;
         if let Some(mut frame) = frame {
@@ -583,8 +666,36 @@ fn run(
                     let marks = annotations.lock().map_err(|_| "Annotation lock failed")?;
                     frame.annotate(&marks).map_err(|e| e.to_string())?;
                 }
+                #[cfg(windows)]
+                {
+                    if request.cursor_highlight {
+                        if let Some(position) = cursor {
+                            frame
+                                .annotate(&[cursor_ring(position, 18.0, &config, [255, 220, 40])])
+                                .map_err(|e| e.to_string())?;
+                        }
+                    }
+                    if let Some((position, began)) = click {
+                        let age = began.elapsed().as_secs_f32();
+                        if age < 0.4 {
+                            frame
+                                .annotate(&[cursor_ring(
+                                    position,
+                                    10.0 + age * 80.0,
+                                    &config,
+                                    [255, 90, 70],
+                                )])
+                                .map_err(|e| e.to_string())?;
+                        } else {
+                            click = None;
+                        }
+                    }
+                }
                 session
-                    .write_video(&mut frame, pts)
+                    .write_video(
+                        &mut frame,
+                        segment_video_pts(pts, segment_start, config.fps),
+                    )
                     .map_err(|e| e.to_string())?;
                 encode_ms =
                     encode_ms * 0.9 + encoding_started.elapsed().as_secs_f64() * 1000.0 * 0.1;
@@ -595,7 +706,7 @@ fn run(
             thread::sleep(Duration::from_millis(2));
         }
         if last_event.elapsed() >= Duration::from_millis(200) {
-            let bytes = config.output.metadata().map(|m| m.len()).unwrap_or(0);
+            let bytes = finalized_bytes + current_path.metadata().map(|m| m.len()).unwrap_or(0);
             if let Ok(mut value) = status.lock() {
                 value["file_bytes"] = json!(bytes);
                 value["skipped_frame_slots"] = json!(skipped);
@@ -626,6 +737,12 @@ fn run(
         }
     }
     update(status, "stopping", None, None, None, None);
+    let final_clock = active_duration(
+        start.elapsed(),
+        paused,
+        pause_start.map(|p| p.elapsed()).unwrap_or_default(),
+    )
+    .as_secs_f64();
     #[cfg(windows)]
     for (index, processor) in processors.iter_mut().enumerate() {
         let mut tail = processor.finish().map_err(|e| e.to_string())?;
@@ -652,19 +769,105 @@ fn run(
             .write_audio(
                 index + usize::from(mix_enabled),
                 &tail,
-                start.elapsed().saturating_sub(paused).as_secs_f64(),
+                final_clock - segment_start,
             )
             .map_err(|e| e.to_string())?;
     }
     #[cfg(windows)]
     if let Some(bus) = &mut mixer {
-        let clock = start.elapsed().saturating_sub(paused).as_secs_f64() + 0.05;
-        let tail = bus.until(clock).map_err(|e| e.to_string())?;
-        session
-            .write_audio(0, &tail, clock)
-            .map_err(|e| e.to_string())?;
+        let clock = final_clock + 0.05;
+        drain_mix(&mut session, bus, clock, segment_start)?;
     }
     session.finish().map_err(|e| e.to_string())?;
-    update(status, "stopped", None, None, Some(frames), None);
+    if let Ok(mut value) = status.lock() {
+        value["segment_durations"][current_path.to_string_lossy().as_ref()] =
+            json!((final_clock - segment_start).max(0.0));
+    }
+    update(
+        status,
+        "stopped",
+        None,
+        None,
+        Some(frames),
+        Some(final_clock),
+    );
     Ok(())
+}
+
+/// Quantize the segment origin once. Rounding a fractional elapsed delta on
+/// every frame can produce duplicate PTS even when absolute ticks increase.
+fn segment_video_pts(absolute: i64, origin: f64, fps: u32) -> i64 {
+    absolute - (origin * f64::from(fps)).floor() as i64
+}
+
+fn active_duration(elapsed: Duration, paused: Duration, current_pause: Duration) -> Duration {
+    elapsed.saturating_sub(paused.saturating_add(current_pause))
+}
+
+#[cfg(windows)]
+fn drain_mix(
+    session: &mut RecordingSession,
+    bus: &mut recorder_engine::audio_processor::AudioMixer,
+    clock: f64,
+    segment_start: f64,
+) -> Result<(), String> {
+    while clock - bus.clock() >= 1.0 / 48000.0 {
+        let samples = bus.until(clock).map_err(|e| e.to_string())?;
+        if samples.is_empty() {
+            break;
+        }
+        session
+            .write_audio(0, &samples, (bus.clock() - segment_start).max(0.0))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn cursor_ring(
+    position: [f32; 2],
+    radius: f32,
+    config: &RecordingConfig,
+    rgb: [u8; 3],
+) -> recorder_engine::overlay::Annotation {
+    recorder_engine::overlay::Annotation {
+        shape: recorder_engine::overlay::Shape::Stroke,
+        points: (0..=32)
+            .map(|i| {
+                let angle = i as f32 * std::f32::consts::TAU / 32.0;
+                [
+                    (position[0] + angle.cos() * radius / config.width as f32).clamp(0.0, 1.0),
+                    (position[1] + angle.sin() * radius / config.height as f32).clamp(0.0, 1.0),
+                ]
+            })
+            .collect(),
+        rgb,
+        width: 2,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{active_duration, segment_video_pts};
+    use std::time::Duration;
+    #[test]
+    fn fractional_segment_origin_keeps_strict_frame_order() {
+        let times = [2.03f64, 2.04, 2.08];
+        let actual: Vec<_> = times
+            .into_iter()
+            .map(|time| segment_video_pts((time * 30.0).floor() as i64, 2.013, 30))
+            .collect();
+        assert_eq!(actual, vec![0, 1, 2]);
+    }
+    #[test]
+    fn stopping_during_pause_excludes_the_unfinished_pause() {
+        assert_eq!(
+            active_duration(
+                Duration::from_secs(10),
+                Duration::from_secs(2),
+                Duration::from_secs(5)
+            ),
+            Duration::from_secs(3)
+        );
+    }
 }

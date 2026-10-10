@@ -1,5 +1,39 @@
 use serde::Serialize;
 
+/// Coordinates stay native and are sampled only for an explicitly enabled
+/// display-capture cursor effect. No keyboard events are collected.
+#[cfg(windows)]
+pub fn cursor_position(id: u64, region: Option<[u32; 4]>) -> Option<[f32; 2]> {
+    use windows_sys::Win32::{
+        Foundation::POINT, Graphics::Gdi::*, UI::WindowsAndMessaging::GetCursorPos,
+    };
+    unsafe {
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        let mut cursor = POINT::default();
+        if GetMonitorInfoW(id as usize as HMONITOR, &mut info) == 0
+            || GetCursorPos(&mut cursor) == 0
+        {
+            return None;
+        }
+        let [left, top, width, height] = region.unwrap_or([
+            0,
+            0,
+            (info.rcMonitor.right - info.rcMonitor.left) as u32,
+            (info.rcMonitor.bottom - info.rcMonitor.top) as u32,
+        ]);
+        let x = cursor.x - info.rcMonitor.left - left as i32;
+        let y = cursor.y - info.rcMonitor.top - top as i32;
+        if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
+            return None;
+        }
+        Some([
+            x as f32 / (width - 1) as f32,
+            y as f32 / (height - 1) as f32,
+        ])
+    }
+}
+
 #[derive(Clone, Serialize)]
 pub struct Source {
     pub id: u64,

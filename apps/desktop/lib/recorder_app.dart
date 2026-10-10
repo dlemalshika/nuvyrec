@@ -49,6 +49,15 @@ class _RecorderAppState extends State<RecorderApp> {
       if (saved is Map) features.restore(Map<String, dynamic>.from(saved));
       savedPresets = (recorder.preferences['presets'] as List? ?? [])
           .whereType<Map>()
+          .where(
+            (p) =>
+                p['name'] is String &&
+                (p['name'] as String).isNotEmpty &&
+                (p['name'] as String).length <= 48 &&
+                p['height'] is num &&
+                p['fps'] is num &&
+                p['bitrate'] is num,
+          )
           .map((p) => Map<String, dynamic>.from(p))
           .take(50)
           .toList();
@@ -236,6 +245,11 @@ class _RecorderAppState extends State<RecorderApp> {
       ...extras,
       'replay_seconds': format == 'gif' ? 0 : features.replaySeconds,
       'annotations_enabled': format != 'gif' && features.annotations,
+      'segment_seconds': format == 'mkv' ? features.segmentSeconds : 0,
+      'cursor_highlight':
+          format != 'gif' && mode != 'window' && features.cursorHighlight,
+      'click_effects':
+          format != 'gif' && mode != 'window' && features.clickEffects,
       'output': recorder.output,
       'container': format,
       'source_id': source['id'],
@@ -244,7 +258,13 @@ class _RecorderAppState extends State<RecorderApp> {
       'height': outHeight,
       'fps': fps,
       'bitrate': bitrate * 1000000,
-      'encoder': features.annotations && format != 'gif' ? 'libx264' : encoder,
+      'encoder':
+          (features.annotations ||
+                  ((features.cursorHighlight || features.clickEffects) &&
+                      mode != 'window')) &&
+              format != 'gif'
+          ? 'libx264'
+          : encoder,
       'system_audio': systemAudio && format != 'gif',
       'microphone': microphone && format != 'gif',
       'region': ?crop,

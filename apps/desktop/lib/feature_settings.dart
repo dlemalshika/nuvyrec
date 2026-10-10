@@ -107,6 +107,28 @@ class FeatureSettings extends StatelessWidget {
                 style: TextStyle(height: 1.8),
               ),
             ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Cursor highlight'),
+              subtitle: const Text(
+                'Display/region captures · software encoding',
+              ),
+              value: options.cursorHighlight,
+              onChanged: active
+                  ? null
+                  : (v) => change(() => options.cursorHighlight = v),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Mouse click rings'),
+              subtitle: const Text(
+                'Display/region captures · software encoding',
+              ),
+              value: options.clickEffects,
+              onChanged: active
+                  ? null
+                  : (v) => change(() => options.clickEffects = v),
+            ),
             if (recorder.hotkeyConflicts.isNotEmpty)
               Text(
                 'Unavailable shortcuts: ${recorder.hotkeyConflicts.join(', ')}',
@@ -123,16 +145,9 @@ class FeatureSettings extends StatelessWidget {
             for (final system in [true, false]) ...[
               DropdownButtonFormField<String>(
                 key: ValueKey('device-$system-${recorder.audioDevices.length}'),
-                initialValue:
-                    recorder.audioDevices.any(
-                      (d) =>
-                          d['id'] ==
-                          (system
-                              ? options.systemDevice
-                              : options.microphoneDevice),
-                    )
-                    ? (system ? options.systemDevice : options.microphoneDevice)
-                    : '',
+                initialValue: system
+                    ? options.systemDevice
+                    : options.microphoneDevice,
                 isExpanded: true,
                 decoration: InputDecoration(
                   labelText: system
@@ -144,6 +159,24 @@ class FeatureSettings extends StatelessWidget {
                     value: '',
                     child: Text('System default'),
                   ),
+                  if ((system ? options.systemDevice : options.microphoneDevice)
+                          .isNotEmpty &&
+                      !recorder.audioDevices.any(
+                        (d) =>
+                            d['id'] ==
+                            (system
+                                ? options.systemDevice
+                                : options.microphoneDevice),
+                      ))
+                    DropdownMenuItem(
+                      value: system
+                          ? options.systemDevice
+                          : options.microphoneDevice,
+                      enabled: false,
+                      child: const Text(
+                        'Saved device unavailable · choose another',
+                      ),
+                    ),
                   ...recorder.audioDevices
                       .where(
                         (d) => d['kind'] == (system ? 'system' : 'microphone'),
@@ -253,6 +286,30 @@ class FeatureSettings extends StatelessWidget {
           ),
           childrenPadding: const EdgeInsets.all(16),
           children: [
+            DropdownButtonFormField<int>(
+              initialValue: options.segmentSeconds,
+              decoration: const InputDecoration(
+                labelText: 'Recovery segments (MKV only)',
+              ),
+              items: [
+                for (final seconds in [0, 60, 300, 900])
+                  DropdownMenuItem(
+                    value: seconds,
+                    child: Text(
+                      seconds == 0 ? 'Off' : 'Every ${seconds ~/ 60} minutes',
+                    ),
+                  ),
+              ],
+              onChanged: active
+                  ? null
+                  : (v) => change(() => options.segmentSeconds = v!),
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'Completed parts remain playable after a crash. The active part may be incomplete. Replay history restarts at each segment.',
+              ),
+            ),
             TextFormField(
               initialValue: '${options.maxSeconds ~/ 60}',
               enabled: !active,

@@ -1,4 +1,4 @@
-# Frame 0.2 — Windows alpha
+# Frame — Windows feature alpha
 
 This is a runnable Windows screen recorder, not the completed four-platform
 OBS/Bandicam competitor requested in the original specification.
@@ -19,6 +19,27 @@ OBS/Bandicam competitor requested in the original specification.
   tracks, converted to 48 kHz stereo through libswresample.
 - CPU fallback that does not require allocating NV12 GPU encoder textures.
 - Atomic refusal to overwrite existing files; bounded frame/audio processing.
+- Native global start/stop, pause/resume and replay hotkeys with conflict reporting;
+  tray menu and hide/restore controls.
+- Mouse-drag region selection and cancellable 3/5/10-second countdown.
+- Selected WASAPI endpoints, live gain/mute, peak meters, microphone FFT noise
+  suppression/gate and limiter. Optional combined playback plus two source tracks.
+- Saved quality presets; future-time recording while the app remains open;
+  duration/file-size auto-stop.
+- Recording library, explicit import, default-player playback, folder reveal,
+  full-resolution PNG screenshots, local MP4 remux, precise trim and crop exports.
+- Encoded-packet replay history (5–120 seconds via ABI; UI 15/30/60/120),
+  4–128 MiB payload budget and 32,768-packet cap. Metadata adds a small bounded
+  overhead. Replay saves independent keyframe-aligned MKV files.
+- Draw/arrow/box/spotlight annotations placed on the preview and composited into
+  recorded YUV420P frames. Maximum 64 objects, 256 points per object, one spotlight.
+  Cursor highlight/click rings support display/region recording. These optional
+  effects explicitly use software encoding and increase CPU work.
+- Optional MKV recovery segments: completed files are finalized/synced individually;
+  up to 1024 parts. The active file remains vulnerable to abrupt failure. Replay
+  history restarts at every segment. Segments may have small boundary timing gaps.
+- File-size/skipped-frame-slot telemetry and free disk space at file selection.
+  Skipped slots are clock gaps, not a count reported by the capture device.
 
 ## Verified on this machine
 
@@ -37,6 +58,17 @@ OBS/Bandicam competitor requested in the original specification.
   preview coordinates, preview-off suspension and layout at 960 × 640.
 - Light/Dark switching in workspace and settings, saved-theme restoration through
   the mocked native preference interface, and switching during active recording.
+- Synthetic audio DSP/resampling, annotation bounds/frame ownership and replay
+  keyframe/audio/timestamp tests. Replay saves do not overwrite existing files.
+- Real six-second packaged display-region recording with annotations, audio
+  DSP, three AAC tracks, replay export and automatic duration stop.
+- Synthetic-media remux, precise trim/crop, track preservation, output refusal
+  and full exported-media decoding through the packaged FFmpeg version.
+- Actual five-second MKV capture split into three independently decoded parts;
+  each part and the replay clip retained all three AAC tracks.
+- Cancellable countdown and normalized live-arrow/clear interaction tests.
+- Slow-clock audio catch-up and fractional segment-origin timestamp regressions.
+- Actual stop-during-pause capture/replay decoded with paused time excluded.
 
 NVENC/AMF paths could not allocate NV12 textures on this machine; the software
 fallback worked and Quick Sync subsequently recorded using CPU-side conversion.
@@ -47,13 +79,15 @@ observed in short smoke tests; sustained real-time throughput is not guaranteed.
 
 - Tested macOS ScreenCaptureKit/Metal implementation and signed packaging.
 - Android MediaProjection service and iOS ReplayKit broadcast-extension apps.
-- Webcam compositor, green-screen keying and live on-screen annotation.
-- Audio mix bus, device selection, accurate discontinuity/drift correction and
-  long-duration synchronization/recovery tests. Current tracks are separate.
+- Webcam compositor/green-screen keying, Unicode text annotations and configurable
+  keystroke overlays. Current drawing takes place inside Frame's preview.
+- Accurate discontinuity/drift correction and long-duration synchronization,
+  fault-injection and power-loss recovery tests.
 - Automatic adaptive bitrate and controlled resolution segmentation.
 - Zero-CPU-readback Quick Sync interop and validation on actual NVENC/AMF devices.
-- Full-rate GPU preview, tray/global hotkeys, persistence, permissions recovery,
-  crash-resistant remux/export, installers and reproducible release CI.
+- Full-rate GPU preview, permission recovery, scene/source-layer composition,
+  RTMP/SRT streaming with reconnect, automatic captions/smart zoom, modern
+  codecs/HDR, installers and reproducible release CI.
 - Verified low-end hardware limits and sustained 4K/120 performance measurements.
 
 The generated macOS runner and mobile reserved directory are not functional
@@ -61,7 +95,8 @@ recording products. No cross-platform or production-readiness claim is made.
 
 The lightweight preview is separate from the WGC recording pipeline. Protected,
 minimized or GPU-rendered windows can have unavailable or incomplete thumbnails.
-Preview does not display the recorded cursor or verify the final encoded output.
+Preview does not display native recorded cursor effects or verify the final
+encoded output; annotation guides are rendered over the preview separately.
 
 ## Distribution
 

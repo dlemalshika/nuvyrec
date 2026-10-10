@@ -321,8 +321,6 @@ class RecorderWorkspace extends StatelessWidget {
                           children: [
                             sourceControls,
                             const SizedBox(height: 16),
-                            _RecordingHealth(recorder: recorder),
-                            const SizedBox(height: 16),
                             Container(
                               padding: const EdgeInsets.all(20),
                               decoration: BoxDecoration(
@@ -413,6 +411,8 @@ class RecorderWorkspace extends StatelessWidget {
                                 ],
                               ),
                             ),
+                            const SizedBox(height: 16),
+                            _RecordingHealth(recorder: recorder),
                             const SizedBox(height: 16),
                             Padding(
                               padding: EdgeInsets.symmetric(horizontal: 8),
