@@ -468,6 +468,21 @@ class _RecordingHealth extends StatelessWidget {
             'Recording health',
             style: TextStyle(fontWeight: FontWeight.w600),
           ),
+          if (['recording', 'paused'].contains(recorder.state) &&
+              status['webcam_ready'] is bool)
+            Text(
+              status['webcam_ready'] == true
+                  ? (recorder.state == 'paused'
+                        ? 'Webcam ready · recording paused'
+                        : 'Webcam recording')
+                  : 'Webcam waiting for frames',
+              style: TextStyle(fontSize: 11, color: colors.muted),
+            ),
+          if (status['webcam_error'] is String)
+            Text(
+              status['webcam_error'] as String,
+              style: TextStyle(fontSize: 11, color: colors.accent),
+            ),
           if (status['effective_height'] is num)
             Text(
               '${status['effective_width']} × ${status['effective_height']} · ${status['effective_fps']} fps · ${((status['effective_bitrate'] as num? ?? 0) / 1000000).toStringAsFixed(1)} Mbps',

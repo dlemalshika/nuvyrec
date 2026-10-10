@@ -14,9 +14,9 @@ import 'package:ffi/ffi.dart';
 /// put encoding calls on the Flutter UI isolate or send raw frames through Dart.
 final class RecorderBridge {
   RecorderBridge(DynamicLibrary library)
-    : _abiVersion = library.lookupFunction<Uint32 Function(), int Function()>(
-        'recorder_abi_version',
-      ) {
+      : _abiVersion = library.lookupFunction<Uint32 Function(), int Function()>(
+          'recorder_abi_version',
+        ) {
     if (abiVersion >> 16 != 1) {
       throw StateError('Unsupported recorder core ABI version: $abiVersion');
     }
@@ -31,24 +31,20 @@ final class RecorderBridge {
 /// allocations are released exclusively through the Rust destructor.
 final class NativeRecorder {
   NativeRecorder(DynamicLibrary library)
-    : _sources = library
-          .lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>(
-            'recorder_sources_json',
-          ),
-      _status = library
-          .lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>(
-            'recorder_status_json',
-          ),
-      _command = library
-          .lookupFunction<
-            Pointer<Utf8> Function(Pointer<Utf8>),
-            Pointer<Utf8> Function(Pointer<Utf8>)
-          >('recorder_command_json'),
-      _release = library
-          .lookupFunction<
-            Void Function(Pointer<Utf8>),
-            void Function(Pointer<Utf8>)
-          >('recorder_string_free') {
+      : _sources = library
+            .lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>(
+          'recorder_sources_json',
+        ),
+        _status = library
+            .lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>(
+          'recorder_status_json',
+        ),
+        _cameras = library.lookupFunction<Pointer<Utf8> Function(),
+            Pointer<Utf8> Function()>('recorder_cameras_json'),
+        _command = library.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>),
+            Pointer<Utf8> Function(Pointer<Utf8>)>('recorder_command_json'),
+        _release = library.lookupFunction<Void Function(Pointer<Utf8>),
+            void Function(Pointer<Utf8>)>('recorder_string_free') {
     RecorderBridge(library);
   }
 
@@ -60,7 +56,7 @@ final class NativeRecorder {
     return NativeRecorder(DynamicLibrary.open(path));
   }
 
-  final Pointer<Utf8> Function() _sources, _status;
+  final Pointer<Utf8> Function() _sources, _status, _cameras;
   final Pointer<Utf8> Function(Pointer<Utf8>) _command;
   final void Function(Pointer<Utf8>) _release;
 
@@ -76,6 +72,7 @@ final class NativeRecorder {
 
   Map<String, dynamic> sources() => _read(_sources());
   Map<String, dynamic> status() => _read(_status());
+  Map<String, dynamic> cameras() => _read(_cameras());
   void command(Map<String, dynamic> command) {
     final input = jsonEncode(command).toNativeUtf8();
     try {

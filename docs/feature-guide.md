@@ -1,6 +1,6 @@
 # Windows feature build
 
-Run `artifacts/Frame-Windows-Performance/Frame.exe`, keeping the bundle together.
+Run `artifacts/Frame-Windows-Webcam/Frame.exe`, keeping the bundle together.
 
 ## Recording
 
@@ -17,6 +17,13 @@ The Low-end PC preset selects 720p/24fps/3Mbps. Keep optional CPU effects off an
 Low-resource mode suspends the thumbnail preview during recording. See
 [performance controls](performance.md) for automatic budgets and adaptive MKV parts. Hardware encoding is
 negotiated against the installed driver; a selected encoder can be unavailable.
+
+## Webcam
+
+Settings → Webcam overlay & green screen → Find cameras. Choose a device and
+enable the overlay; choose its corner/size, mirror and green-background controls.
+The saved video includes the camera; the lightweight screen preview does not.
+See [webcam setup and limitations](webcam.md). This adds software-encoding work.
 
 ## Audio and effects
 

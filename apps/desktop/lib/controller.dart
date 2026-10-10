@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:recorder_bridge/recorder_bridge.dart';
@@ -23,6 +24,9 @@ class RecorderController extends ChangeNotifier {
   Map<String, dynamic> status = {'state': 'idle'};
   List<Map<String, dynamic>> sources = [];
   Map<String, dynamic> machine = {};
+  List<Map<String, dynamic>> cameras = [];
+  bool camerasLoading = false, _disposed = false;
+  String? cameraError;
   String? error;
   String? output;
   static const host = MethodChannel('org.screenrecorder/host');
@@ -123,6 +127,34 @@ class RecorderController extends ChangeNotifier {
       notifyListeners();
     } catch (_) {
       /* Recording will still attempt the default native devices. */
+    }
+  }
+
+  /// Device enumeration stays outside Flutter's rendering isolate.
+  Future<void> refreshCameras() async {
+    if (camerasLoading || active) return;
+    camerasLoading = true;
+    cameraError = null;
+    notifyListeners();
+    try {
+      final value = await Isolate.run(() => NativeRecorder.open().cameras());
+      if (_disposed) return;
+      if (value['ok'] != true) {
+        throw StateError(
+          value['error'] as String? ?? 'Camera discovery failed',
+        );
+      }
+      cameras = (value['devices'] as List)
+          .whereType<Map>()
+          .map((v) => Map<String, dynamic>.from(v))
+          .toList();
+    } catch (e) {
+      if (!_disposed) cameraError = e.toString();
+    } finally {
+      if (!_disposed) {
+        camerasLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -382,6 +414,7 @@ class RecorderController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _timer?.cancel();
     _countdownTimer?.cancel();
     _scheduleTimer?.cancel();

@@ -12,6 +12,21 @@ class FeatureOptions {
   bool cursorHighlight = false, clickEffects = false;
   String performanceMode = 'automatic';
   bool adaptiveQuality = true;
+  bool webcamEnabled = false, webcamMirror = true, webcamKey = false;
+  String webcamDevice = '';
+  double webcamX = 1, webcamY = 1, webcamWidth = .25;
+  double webcamSimilarity = .15, webcamSoftness = .08;
+  Map<String, dynamic> get webcam => {
+    'enabled': webcamEnabled,
+    'device': webcamDevice,
+    'x': webcamX,
+    'y': webcamY,
+    'width': webcamWidth,
+    'mirror': webcamMirror,
+    'key': webcamKey,
+    'similarity': webcamSimilarity,
+    'softness': webcamSoftness,
+  };
   Map<String, dynamic> get audioControls => {
     'system_gain': systemGain,
     'microphone_gain': microphoneGain,
@@ -38,8 +53,27 @@ class FeatureOptions {
     'segment_seconds': segmentSeconds,
     'performance_mode': performanceMode,
     'adaptive_quality': adaptiveQuality,
+    'webcam': webcam,
   };
   void restore(Map<String, dynamic> data) {
+    final camera = data['webcam'];
+    if (camera is Map) {
+      webcamEnabled = camera['enabled'] == true;
+      webcamDevice = camera['device'] is String
+          ? camera['device'] as String
+          : '';
+      webcamMirror = camera['mirror'] != false;
+      webcamKey = camera['key'] == true;
+      double value(String key, double fallback, double min, double max) =>
+          camera[key] is num && (camera[key] as num).toDouble().isFinite
+          ? (camera[key] as num).toDouble().clamp(min, max)
+          : fallback;
+      webcamX = value('x', 1, 0, 1);
+      webcamY = value('y', 1, 0, 1);
+      webcamWidth = value('width', .25, .1, .5);
+      webcamSimilarity = value('similarity', .15, .05, .6);
+      webcamSoftness = value('softness', .08, .01, .3);
+    }
     int bounded(String key, int fallback, int max) =>
         data[key] is num ? (data[key] as num).toInt().clamp(0, max) : fallback;
     countdown = bounded('countdown', 0, 10);

@@ -10,6 +10,17 @@ pub struct VideoFrame {
 }
 
 impl VideoFrame {
+    /// Reference-counted clone; compositors call make_writable before mutation.
+    pub fn try_clone(&self) -> Result<Self> {
+        let raw = unsafe { av::av_frame_clone(self.raw) };
+        if raw.is_null() {
+            return Err(Error::Allocation("clone video frame"));
+        }
+        Ok(Self {
+            raw,
+            _thread_confined: PhantomData,
+        })
+    }
     pub(crate) fn empty() -> Result<Self> {
         let raw = unsafe { av::av_frame_alloc() };
         if raw.is_null() {

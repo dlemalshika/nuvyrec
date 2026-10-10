@@ -20,6 +20,9 @@ parser.add_argument('--bundle', type=Path)
 parser.add_argument('--library', type=Path)
 parser.add_argument('--performance', choices=['manual','automatic','eco'], default='manual')
 parser.add_argument('--adaptive', action='store_true', help='Exercise a user-requested resolution/bitrate reduction into a new MKV part')
+parser.add_argument('--webcam', action='store_true', help='Open the first enumerated camera and verify actual frames are composited')
+parser.add_argument('--list-cameras', action='store_true', help='Report available camera count without opening cameras or screen capture')
+parser.add_argument('--missing-webcam', action='store_true', help='Verify a missing camera reports an error while screen recording continues')
 parser.add_argument('--features', action='store_true', help='Exercise audio DSP/mix, annotations, replay and auto-stop')
 parser.add_argument('--segments', action='store_true', help='Exercise short independently finalized MKV parts')
 parser.add_argument('--stop-paused', action='store_true', help='Stop while paused and verify paused time is excluded')
@@ -57,6 +60,14 @@ def command(action, config=None):
     if not response.get('ok'):
         raise RuntimeError(response.get('error'))
 
+if args.list_cameras or args.webcam:
+    library.recorder_cameras_json.restype = ctypes.c_void_p
+    camera_devices = read(library.recorder_cameras_json())
+    if not camera_devices.get('ok'): raise RuntimeError(camera_devices.get('error'))
+    if args.list_cameras:
+        print(json.dumps({'camera_count':len(camera_devices['devices'])}))
+        raise SystemExit(0)
+    if not camera_devices['devices']: raise RuntimeError('No webcam available for real-camera verification')
 sources = read(library.recorder_sources_json())['sources']
 source = next(s for s in sources if s['kind'] == 'display')
 directory = root / 'artifacts'
@@ -80,14 +91,21 @@ if args.segments:
     config.update(segment_seconds=2, max_seconds=5)
 if args.region:
     config['region'] = [0, 0, min(640, source['width']), min(360, source['height'])]
+if args.webcam:
+    config.update(webcam={'enabled':True,'device':camera_devices['devices'][0]['id'],'key':True}, max_seconds=10)
+if args.missing_webcam:
+    config.update(webcam={'enabled':True,'device':'frame-nonexistent-test-camera'})
 command('start', config)
 deadline = time.monotonic() + 25
 started = None
 saved_replay = False
 reduced_quality = False
+saw_camera = False
 try:
     while time.monotonic() < deadline:
         status = read(library.recorder_status_json())
+        saw_camera = saw_camera or status.get('webcam_ready',False)
+        if args.webcam and status.get('webcam_error'): raise RuntimeError(status['webcam_error'])
         if status['state'] == 'failed':
             raise RuntimeError(status.get('error'))
         if status['state'] == 'recording':
@@ -110,10 +128,10 @@ try:
                 time.sleep(1)
                 command('stop')
                 break
-            if not args.features and not args.segments and time.monotonic() - started > 3:
+            if not args.features and not args.segments and not args.webcam and time.monotonic() - started > 3:
                 command('stop')
                 break
-        if (args.features or args.segments) and status['state'] == 'stopped': break
+        if (args.features or args.segments or args.webcam) and status['state'] == 'stopped': break
         time.sleep(.1)
     else:
         raise RuntimeError('Native capture did not start before timeout')
@@ -137,6 +155,8 @@ try:
         assert all(Path(path).exists() for path in status['outputs']), status
     if args.adaptive:
         assert len(status['outputs']) >= 2 and status['effective_height'] < 1080, status
+    if args.webcam: assert saw_camera, 'Camera never produced a usable frame'
+    if args.missing_webcam: assert status.get('webcam_error') and not saw_camera, status
     print(json.dumps({'file': str(output), 'frames': status['frames'],
                       'encoder': status['encoder'], 'state': status['state'],
                       'replay': str(replay_output) if args.features else None,

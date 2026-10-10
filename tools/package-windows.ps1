@@ -2,7 +2,9 @@
 param(
     [switch]$SkipBuild,
     [ValidatePattern('^Frame-Windows(?:-[A-Za-z0-9]+)*$')]
-    [string]$BundleName = 'Frame-Windows'
+    [string]$BundleName = 'Frame-Windows',
+    [ValidatePattern('^target(?:[\\/][A-Za-z0-9_-]+)*$')]
+    [string]$NativeTargetDir = 'target'
 )
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
@@ -10,7 +12,7 @@ $taskRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $taskRoot
 try {
     if (-not $SkipBuild) {
-        & cargo build -p recorder-ffi --release --locked
+        & cargo build -p recorder-ffi --release --locked --target-dir $NativeTargetDir
         if ($LASTEXITCODE -ne 0) { throw 'Native build failed' }
         Push-Location (Join-Path $taskRoot 'apps\desktop')
         try {
@@ -30,7 +32,7 @@ try {
     }
     New-Item -ItemType Directory -Path $bundleRoot -Force | Out-Null
     Copy-Item -Path (Join-Path $taskRoot 'apps\desktop\build\windows\x64\runner\Release\*') -Destination $bundleRoot -Recurse -Force
-    Copy-Item -LiteralPath (Join-Path $taskRoot 'target\release\recorder_core.dll') -Destination $bundleRoot -Force
+    Copy-Item -LiteralPath (Join-Path $taskRoot "$NativeTargetDir\release\recorder_core.dll") -Destination $bundleRoot -Force
     Copy-Item -Path "$env:FFMPEG_DIR\bin\*.dll" -Destination $bundleRoot -Force
     Copy-Item -LiteralPath "$env:FFMPEG_DIR\bin\ffmpeg.exe","$env:FFMPEG_DIR\bin\ffprobe.exe" -Destination $bundleRoot -Force
     $runtimeRoot = 'C:\Program Files\Microsoft Visual Studio\18\Community\VC\Redist\MSVC\14.51.36231\x64\Microsoft.VC145.CRT'

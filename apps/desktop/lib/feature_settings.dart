@@ -29,6 +29,142 @@ class FeatureSettings extends StatelessWidget {
     return Column(
       children: [
         ExpansionTile(
+          title: const Text('Webcam overlay & green screen'),
+          subtitle: const Text(
+            'Camera, placement, mirror and background removal',
+          ),
+          childrenPadding: const EdgeInsets.all(16),
+          children: [
+            const Text(
+              'Recorded-video overlay. Uses software H.264 encoding and adds CPU work. Camera frames are limited to 15 updates/second; Low resource uses a smaller camera image. The screen thumbnail does not show the final webcam composite.',
+            ),
+            TextButton.icon(
+              onPressed: active || recorder.camerasLoading
+                  ? null
+                  : recorder.refreshCameras,
+              icon: const Icon(Icons.refresh),
+              label: Text(
+                recorder.camerasLoading ? 'Finding cameras…' : 'Find cameras',
+              ),
+            ),
+            if (recorder.cameraError != null) Text(recorder.cameraError!),
+            if (!recorder.camerasLoading && recorder.cameras.isEmpty)
+              const Text(
+                'Find cameras to choose an available device. Check Windows camera privacy permissions if capture fails.',
+              ),
+            DropdownButtonFormField<String>(
+              key: ValueKey(
+                'camera-${recorder.cameras.length}-${options.webcamDevice}',
+              ),
+              initialValue: options.webcamDevice,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Camera'),
+              items: [
+                const DropdownMenuItem(
+                  value: '',
+                  child: Text('Choose a camera'),
+                ),
+                if (options.webcamDevice.isNotEmpty &&
+                    !recorder.cameras.any(
+                      (c) => c['id'] == options.webcamDevice,
+                    ))
+                  DropdownMenuItem(
+                    value: options.webcamDevice,
+                    child: const Text('Saved camera · refresh availability'),
+                  ),
+                for (final camera in recorder.cameras)
+                  DropdownMenuItem(
+                    value: camera['id'] as String,
+                    child: Text(
+                      camera['name'] as String,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: active
+                  ? null
+                  : (v) => change(() => options.webcamDevice = v!),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Record webcam overlay'),
+              value: options.webcamEnabled,
+              onChanged: active || options.webcamDevice.isEmpty
+                  ? null
+                  : (v) => change(() => options.webcamEnabled = v),
+            ),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final corner in [
+                  ('Top left', 0.0, 0.0),
+                  ('Top right', 1.0, 0.0),
+                  ('Bottom left', 0.0, 1.0),
+                  ('Bottom right', 1.0, 1.0),
+                ])
+                  ChoiceChip(
+                    label: Text(corner.$1),
+                    selected:
+                        options.webcamX == corner.$2 &&
+                        options.webcamY == corner.$3,
+                    onSelected: active
+                        ? null
+                        : (_) => change(() {
+                            options.webcamX = corner.$2;
+                            options.webcamY = corner.$3;
+                          }),
+                  ),
+              ],
+            ),
+            Text('Overlay width: ${(options.webcamWidth * 100).round()}%'),
+            Slider(
+              value: options.webcamWidth,
+              min: .1,
+              max: .5,
+              divisions: 8,
+              onChanged: active
+                  ? null
+                  : (v) => change(() => options.webcamWidth = v),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Mirror camera'),
+              value: options.webcamMirror,
+              onChanged: active
+                  ? null
+                  : (v) => change(() => options.webcamMirror = v),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Remove green background'),
+              value: options.webcamKey,
+              onChanged: active
+                  ? null
+                  : (v) => change(() => options.webcamKey = v),
+            ),
+            if (options.webcamKey) ...[
+              const Text('Green similarity'),
+              Slider(
+                value: options.webcamSimilarity,
+                min: .05,
+                max: .6,
+                onChanged: active
+                    ? null
+                    : (v) => change(() => options.webcamSimilarity = v),
+              ),
+              const Text('Edge softness'),
+              Slider(
+                value: options.webcamSoftness,
+                min: .01,
+                max: .3,
+                onChanged: active
+                    ? null
+                    : (v) => change(() => options.webcamSoftness = v),
+              ),
+            ],
+          ],
+        ),
+        ExpansionTile(
           title: const Text('Performance & PC compatibility'),
           subtitle: const Text(
             'Automatic budgets, low-resource mode and adaptive quality',

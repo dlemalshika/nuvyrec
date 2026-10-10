@@ -49,6 +49,48 @@ fn manual_mode() -> String {
 }
 
 #[derive(Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WebcamRequest {
+    pub enabled: bool,
+    pub device: String,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub mirror: bool,
+    pub key: bool,
+    pub similarity: f32,
+    pub softness: f32,
+}
+impl Default for WebcamRequest {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            device: String::new(),
+            x: 1.0,
+            y: 1.0,
+            width: 0.25,
+            mirror: true,
+            key: false,
+            similarity: 0.15,
+            softness: 0.08,
+        }
+    }
+}
+impl WebcamRequest {
+    fn placement(&self) -> recorder_engine::webcam::Placement {
+        recorder_engine::webcam::Placement {
+            x: self.x,
+            y: self.y,
+            width: self.width,
+            mirror: self.mirror,
+            key: self.key,
+            similarity: self.similarity,
+            softness: self.softness,
+        }
+    }
+}
+
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnnotationRequest {
     pub kind: String,
@@ -149,6 +191,8 @@ pub struct Request {
     pub performance_mode: String,
     #[serde(default)]
     pub adaptive_quality: bool,
+    #[serde(default)]
+    pub webcam: WebcamRequest,
 }
 
 pub struct Worker {
@@ -205,16 +249,26 @@ impl Worker {
             false,
         );
         request.audio_controls.validate()?;
+        if request.webcam.enabled
+            && (!request.webcam.placement().valid()
+                || request.webcam.device.is_empty()
+                || request.webcam.device.len() > 4096)
+        {
+            return Err("Choose a webcam and valid overlay settings".into());
+        }
         if request.segment_seconds != 0
             && (!(2..=3600).contains(&request.segment_seconds) || request.container != "mkv")
         {
             return Err("Recovery segments require MKV and a 2–3600 second interval".into());
         }
-        if (request.annotations_enabled || request.cursor_highlight || request.click_effects)
+        if (request.annotations_enabled
+            || request.cursor_highlight
+            || request.click_effects
+            || request.webcam.enabled)
             && (request.container == "gif"
                 || !["auto", "libx264"].contains(&request.encoder.as_str()))
         {
-            return Err("Annotations require auto/software H.264 encoding".into());
+            return Err("Overlays require auto/software H.264 encoding".into());
         }
         if request.replay_seconds > 0
             && (request.container == "gif"
@@ -414,7 +468,11 @@ fn run(
     let cursor = u8::from(request.capture_cursor);
     let candidates: Vec<&str> = if request.container == "gif" {
         vec!["gif"]
-    } else if request.annotations_enabled || request.cursor_highlight || request.click_effects {
+    } else if request.annotations_enabled
+        || request.cursor_highlight
+        || request.click_effects
+        || request.webcam.enabled
+    {
         vec!["libx264"]
     } else if request.encoder == "auto" {
         vec!["h264_nvenc", "h264_amf", "h264_qsv", "libx264"]
@@ -470,6 +528,26 @@ fn run(
     }
     let (encoder, (mut capture, mut session, mut first)) =
         chosen.ok_or_else(|| failures.join("; "))?;
+    let camera = if request.webcam.enabled {
+        Some(
+            recorder_engine::webcam::Camera::start(
+                request.webcam.device.clone(),
+                if request.performance_mode == "eco" {
+                    320
+                } else {
+                    640
+                },
+            )
+            .map_err(|e| e.to_string())?,
+        )
+    } else {
+        None
+    };
+    let mut last_screen = if camera.is_some() {
+        Some(first.try_clone().map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
     if request.replay_seconds > 0 {
         session
             .enable_replay(request.replay_seconds, request.replay_mib)
@@ -746,10 +824,34 @@ fn run(
             drain_mix(&mut session, bus, elapsed.as_secs_f64(), segment_start)?;
         }
         let pts = (elapsed.as_secs_f64() * f64::from(config.fps)).floor() as i64;
+        if camera.is_some() {
+            if let Some(base) = &frame {
+                last_screen = Some(base.try_clone().map_err(|e| e.to_string())?);
+            }
+            if frame.is_none() && pts > last_pts {
+                frame = last_screen
+                    .as_ref()
+                    .map(|base| base.try_clone())
+                    .transpose()
+                    .map_err(|e| e.to_string())?;
+            }
+        }
         if let Some(mut frame) = frame {
             if pts > last_pts {
                 skipped += (pts - last_pts - 1) as u64;
                 let encoding_started = Instant::now();
+                if let Some(camera) = &camera {
+                    if let Ok(image) = camera.latest.lock() {
+                        if let Some(image) = image
+                            .as_ref()
+                            .filter(|v| v.captured.elapsed() < Duration::from_secs(2))
+                        {
+                            frame
+                                .webcam(image, &request.webcam.placement())
+                                .map_err(|e| e.to_string())?;
+                        }
+                    }
+                }
                 if request.annotations_enabled {
                     let marks = annotations.lock().map_err(|_| "Annotation lock failed")?;
                     frame.annotate(&marks).map_err(|e| e.to_string())?;
@@ -794,6 +896,14 @@ fn run(
             thread::sleep(Duration::from_millis(2));
         }
         if last_event.elapsed() >= Duration::from_millis(200) {
+            if let Some(camera) = &camera {
+                if let Ok(mut value) = status.lock() {
+                    value["webcam_error"] = json!(camera.error.lock().ok().and_then(|v| v.clone()));
+                    value["webcam_ready"] = json!(camera.latest.lock().ok().is_some_and(|v| v
+                        .as_ref()
+                        .is_some_and(|image| image.captured.elapsed() < Duration::from_secs(2))));
+                }
+            }
             let bytes = finalized_bytes + current_path.metadata().map(|m| m.len()).unwrap_or(0);
             if let Ok(mut value) = status.lock() {
                 value["file_bytes"] = json!(bytes);

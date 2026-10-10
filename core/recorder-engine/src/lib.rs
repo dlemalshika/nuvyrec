@@ -15,6 +15,7 @@ mod replay;
 mod session;
 #[cfg(windows)]
 pub mod wasapi;
+pub mod webcam;
 
 pub use error::{Error, Result};
 pub use frame::VideoFrame;

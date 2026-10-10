@@ -18,13 +18,24 @@ fn guard(operation: impl FnOnce() -> serde_json::Value) -> *mut c_char {
 }
 #[no_mangle]
 pub extern "C" fn recorder_abi_version() -> u32 {
-    0x0001_0100
+    0x0001_0200
 }
 #[no_mangle]
 pub extern "C" fn recorder_sources_json() -> *mut c_char {
     guard(
         || json!({"ok":true,"sources":sources::enumerate(),"platform":std::env::consts::OS,"performance":performance::Machine::detect()}),
     )
+}
+/// Enumerates cameras without opening a capture stream. Call on a background
+/// isolate: some DirectShow drivers enumerate slowly.
+#[no_mangle]
+pub extern "C" fn recorder_cameras_json() -> *mut c_char {
+    guard(|| match recorder_engine::webcam::devices() {
+        Ok(devices) => {
+            json!({"ok": true, "devices": devices.into_iter().map(|(id,name)| json!({"id":id,"name":name})).collect::<Vec<_>>()})
+        }
+        Err(error) => json!({"ok":false,"error":error.to_string()}),
+    })
 }
 /// # Safety
 /// text must be a valid NUL-terminated UTF-8 C string during this call. The

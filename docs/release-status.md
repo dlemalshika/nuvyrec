@@ -1,4 +1,4 @@
-# Frame — Windows performance alpha
+# Frame — Windows webcam alpha
 
 This is a runnable Windows screen recorder, not the completed four-platform
 OBS/Bandicam competitor requested in the original specification.
@@ -46,6 +46,10 @@ OBS/Bandicam competitor requested in the original specification.
 - Adaptive MKV quality reduction under sustained overload, with finalized parts,
   cooldown and a manual Reduce recording load action. See [performance](performance.md).
 
+- Windows DirectShow webcam worker and YUV420P compositor with mirror, corner/size
+  placement and soft green key; latest-frame buffering and camera-error telemetry.
+  Webcam is opt-in and uses software encoding. See [webcam limitations](webcam.md).
+
 ## Verified on this machine
 
 - Rust compilation, Clippy and configuration/lifecycle regression tests.
@@ -79,6 +83,15 @@ OBS/Bandicam competitor requested in the original specification.
   both parts and replay fully decoded with three AAC tracks.
 - Low-resource 24 fps region recording using Quick Sync and system audio.
 
+- Native webcam discovery found two devices; actual ten-second webcam/display
+  recording with drawing, green key, three AAC tracks, replay and 1080p to 720p
+  transition produced fully decoded MKV parts and replay.
+- Synthetic camera compositor video fully decoded; webcam settings/persistence
+  and active-recording locks verified at 960 x 640.
+
+- Packaged low-resource webcam recording and replay decoded with three AAC tracks;
+  missing-camera error did not prevent screen recording finalization.
+
 NVENC/AMF paths could not allocate NV12 textures on this machine; the software
 fallback worked and Quick Sync subsequently recorded using CPU-side conversion.
 This does not validate the NVENC/AMF hardware paths on other GPUs. Frame loss was
@@ -88,8 +101,7 @@ observed in short smoke tests; sustained real-time throughput is not guaranteed.
 
 - Tested macOS ScreenCaptureKit/Metal implementation and signed packaging.
 - Android MediaProjection service and iOS ReplayKit broadcast-extension apps.
-- Webcam compositor/green-screen keying, Unicode text annotations and configurable
-  keystroke overlays. Current drawing takes place inside Frame's preview.
+- Unicode text annotations and configurable keystroke overlays. Current drawing takes place inside Frame's preview.
 - Accurate discontinuity/drift correction and long-duration synchronization,
   fault-injection and power-loss recovery tests.
 - Zero-CPU-readback Quick Sync interop and validation on actual NVENC/AMF devices.

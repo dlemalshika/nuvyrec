@@ -251,6 +251,10 @@ class _RecorderAppState extends State<RecorderApp> {
       'annotations_enabled': format != 'gif' && features.annotations,
       'segment_seconds': format == 'mkv' ? features.segmentSeconds : 0,
       'adaptive_quality': format == 'mkv' && features.adaptiveQuality,
+      'webcam': {
+        ...features.webcam,
+        'enabled': format != 'gif' && features.webcamEnabled,
+      },
       'cursor_highlight':
           format != 'gif' && mode != 'window' && features.cursorHighlight,
       'click_effects':
@@ -265,6 +269,7 @@ class _RecorderAppState extends State<RecorderApp> {
       'bitrate': bitrate * 1000000,
       'encoder':
           (features.annotations ||
+                  features.webcamEnabled ||
                   ((features.cursorHighlight || features.clickEffects) &&
                       mode != 'window')) &&
               format != 'gif'

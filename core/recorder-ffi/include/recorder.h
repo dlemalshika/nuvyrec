@@ -13,6 +13,8 @@ RECORDER_API uint32_t recorder_abi_version(void);
 /* Small UTF-8 JSON records, never pixel buffers. Returned strings are owned by
  * Rust and must be freed exactly once with recorder_string_free. */
 RECORDER_API char* recorder_sources_json(void);
+/* May enumerate slowly: use a background UI isolate. Does not open a camera. */
+RECORDER_API char* recorder_cameras_json(void);
 RECORDER_API char* recorder_command_json(const char* command);
 RECORDER_API char* recorder_status_json(void);
 RECORDER_API void recorder_string_free(char* response);

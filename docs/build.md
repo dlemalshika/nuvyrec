@@ -10,7 +10,7 @@
 
 FFmpeg headers, import libraries and runtime DLLs must match. A CLI-only FFmpeg
 installation is insufficient. The engine links avcodec, avformat, avutil, avfilter
-and swresample; recording does not spawn the ffmpeg executable. CLI tools are
+avdevice, swscale and swresample; recording does not spawn the ffmpeg executable. CLI tools are
 used only for independent probe/decode verification.
 
 ## Build this prepared workspace
@@ -95,3 +95,7 @@ but the shipped capture worker is Windows-only. macOS needs ScreenCaptureKit/
 VideoToolbox and signed dylib packaging. Android requires NDK/JNI plus a
 MediaProjection service; iOS requires static libraries and a ReplayKit extension.
 These are remaining implementation work, not available build targets today.
+
+For an isolated native build directory (useful when generated import libraries
+are locked), use cargo build -p recorder-ffi --release --locked --target-dir
+target/webcam-final and package with -NativeTargetDir target/webcam-final.
