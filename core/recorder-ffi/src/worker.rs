@@ -1,0 +1,670 @@
+use crate::sources;
+use recorder_engine::{capture::Capture, Container, RecordingConfig, RecordingSession};
+use serde::Deserialize;
+use serde_json::json;
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    thread::{self, JoinHandle},
+    time::{Duration, Instant},
+};
+
+#[derive(Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AudioControls {
+    pub system_gain: f32,
+    pub microphone_gain: f32,
+    pub system_muted: bool,
+    pub microphone_muted: bool,
+}
+impl Default for AudioControls {
+    fn default() -> Self {
+        Self {
+            system_gain: 1.0,
+            microphone_gain: 1.0,
+            system_muted: false,
+            microphone_muted: false,
+        }
+    }
+}
+impl AudioControls {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.system_gain.is_finite()
+            || !self.microphone_gain.is_finite()
+            || !(0.0..=2.0).contains(&self.system_gain)
+            || !(0.0..=2.0).contains(&self.microphone_gain)
+        {
+            return Err("Audio gain must be between 0% and 200%".into());
+        }
+        Ok(())
+    }
+}
+fn enabled() -> bool {
+    true
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnnotationRequest {
+    pub kind: String,
+    pub points: Vec<[f32; 2]>,
+    pub rgb: [u8; 3],
+    pub width: u32,
+}
+pub fn annotations(
+    value: serde_json::Value,
+) -> Result<Vec<recorder_engine::overlay::Annotation>, String> {
+    use recorder_engine::overlay::{Annotation, Shape};
+    let requests: Vec<AnnotationRequest> =
+        serde_json::from_value(value).map_err(|e| e.to_string())?;
+    if requests.len() > 64 || requests.iter().filter(|r| r.kind == "spotlight").count() > 1 {
+        return Err("Limit annotations to 64 objects and one spotlight".into());
+    }
+    requests
+        .into_iter()
+        .map(|r| {
+            if r.points.is_empty()
+                || r.points.len() > 256
+                || !(1..=16).contains(&r.width)
+                || r.points
+                    .iter()
+                    .flatten()
+                    .any(|v| !v.is_finite() || !(0.0..=1.0).contains(v))
+            {
+                return Err("Invalid annotation geometry".into());
+            }
+            let shape = match r.kind.as_str() {
+                "draw" => Shape::Stroke,
+                "arrow" => Shape::Arrow,
+                "box" => Shape::Box,
+                "spotlight" => Shape::Spotlight,
+                _ => return Err("Unknown annotation tool".into()),
+            };
+            Ok(Annotation {
+                shape,
+                points: r.points,
+                rgb: r.rgb,
+                width: r.width,
+            })
+        })
+        .collect()
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Request {
+    pub output: String,
+    pub container: String,
+    pub source_id: u64,
+    pub source_kind: String,
+    pub width: u32,
+    pub height: u32,
+    pub fps: u32,
+    pub bitrate: u32,
+    pub encoder: String,
+    #[serde(default)]
+    pub system_audio: bool,
+    #[serde(default)]
+    pub microphone: bool,
+    #[serde(default)]
+    pub region: Option<[u32; 4]>,
+    #[serde(default)]
+    pub system_device: String,
+    #[serde(default)]
+    pub microphone_device: String,
+    #[serde(default)]
+    pub audio_controls: AudioControls,
+    #[serde(default)]
+    pub mix_audio: bool,
+    #[serde(default)]
+    pub noise_suppression: bool,
+    #[serde(default)]
+    pub noise_gate: bool,
+    #[serde(default)]
+    pub limiter: bool,
+    #[serde(default)]
+    pub max_seconds: u32,
+    #[serde(default)]
+    pub max_file_mib: u32,
+    #[serde(default = "enabled")]
+    pub capture_cursor: bool,
+    #[serde(default)]
+    pub replay_seconds: u32,
+    #[serde(default)]
+    pub replay_mib: u32,
+    #[serde(default)]
+    pub annotations_enabled: bool,
+}
+
+pub struct Worker {
+    pub stop: Arc<AtomicBool>,
+    pub pause: Arc<AtomicBool>,
+    pub status: Arc<Mutex<serde_json::Value>>,
+    pub thread: Option<JoinHandle<()>>,
+    pub audio_controls: Arc<Mutex<AudioControls>>,
+    pub replay_request: Arc<Mutex<Option<String>>>,
+    pub annotations: Arc<Mutex<Vec<recorder_engine::overlay::Annotation>>>,
+}
+
+impl Worker {
+    pub fn start(request: Request) -> Result<Self, String> {
+        if !cfg!(windows) {
+            return Err("Native desktop capture is currently available on Windows only".into());
+        }
+        let source = sources::enumerate()
+            .into_iter()
+            .find(|s| s.id == request.source_id && s.kind == request.source_kind)
+            .ok_or("Capture source no longer exists; refresh the source list")?;
+        if !["auto", "libx264", "h264_nvenc", "h264_amf", "h264_qsv"]
+            .contains(&request.encoder.as_str())
+        {
+            return Err("Unsupported encoder".into());
+        }
+        let container = match request.container.as_str() {
+            "mp4" => Container::Mp4,
+            "mkv" => Container::Matroska,
+            "avi" => Container::Avi,
+            "gif" => Container::Gif,
+            _ => return Err("Unsupported recording container".into()),
+        };
+        let config = RecordingConfig {
+            output: request.output.clone().into(),
+            container,
+            width: request.width,
+            height: request.height,
+            fps: request.fps,
+            bitrate: request.bitrate,
+            encoder_threads: 2,
+        };
+        config.validate().map_err(str::to_owned)?;
+        request.audio_controls.validate()?;
+        if request.annotations_enabled
+            && (request.container == "gif"
+                || !["auto", "libx264"].contains(&request.encoder.as_str()))
+        {
+            return Err("Annotations require auto/software H.264 encoding".into());
+        }
+        if request.replay_seconds > 0
+            && (request.container == "gif"
+                || !(5..=120).contains(&request.replay_seconds)
+                || !(4..=128).contains(&request.replay_mib))
+        {
+            return Err("Replay requires H.264 video, 5–120 seconds and 4–128 MiB".into());
+        }
+        if request.max_seconds > 86400 || request.max_file_mib > 1048576 {
+            return Err("Recording limits exceed 24 hours or 1 TiB".into());
+        }
+        if request.container == "gif" && (request.system_audio || request.microphone) {
+            return Err("GIF does not support audio tracks".into());
+        }
+        if request.container == "gif" && (request.fps > 15 || request.height > 720) {
+            return Err("GIF recordings are limited to 720p and 15 fps".into());
+        }
+        if config.output.exists() {
+            return Err("Output file already exists; choose a new file".into());
+        }
+        if let Some([x, y, w, h]) = request.region {
+            if source.kind != "display"
+                || w < 2
+                || h < 2
+                || x.checked_add(w).is_none_or(|r| r > source.width)
+                || y.checked_add(h).is_none_or(|b| b > source.height)
+            {
+                return Err("Region must fit inside the selected display".into());
+            }
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let pause = Arc::new(AtomicBool::new(false));
+        let status = Arc::new(Mutex::new(
+            json!({"state":"preparing","output":request.output,"frames":0,"seconds":0}),
+        ));
+        let worker_stop = stop.clone();
+        let worker_pause = pause.clone();
+        let worker_status = status.clone();
+        let audio_controls = Arc::new(Mutex::new(request.audio_controls.clone()));
+        let worker_controls = audio_controls.clone();
+        let replay_request = Arc::new(Mutex::new(None));
+        let worker_replay = replay_request.clone();
+        let annotations = Arc::new(Mutex::new(Vec::new()));
+        let worker_annotations = annotations.clone();
+        let thread = thread::Builder::new()
+            .name("recorder-media".into())
+            .spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    run(
+                        request,
+                        config,
+                        source,
+                        &worker_stop,
+                        &worker_pause,
+                        &worker_status,
+                        &worker_controls,
+                        &worker_replay,
+                        &worker_annotations,
+                    )
+                }));
+                let error = match result {
+                    Ok(Ok(())) => None,
+                    Ok(Err(e)) => Some(e),
+                    Err(_) => Some("Native recording worker panicked".into()),
+                };
+                if let Some(error) = error {
+                    update(&worker_status, "failed", Some(&error), None, None, None);
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        Ok(Self {
+            stop,
+            pause,
+            status,
+            thread: Some(thread),
+            audio_controls,
+            replay_request,
+            annotations,
+        })
+    }
+    pub fn finished(&self) -> bool {
+        self.thread.as_ref().is_none_or(|t| t.is_finished())
+    }
+}
+
+fn update(
+    status: &Mutex<serde_json::Value>,
+    state: &str,
+    error: Option<&str>,
+    encoder: Option<&str>,
+    frames: Option<u64>,
+    seconds: Option<f64>,
+) {
+    if let Ok(mut value) = status.lock() {
+        value["state"] = json!(state);
+        if let Some(e) = error {
+            value["error"] = json!(e);
+        }
+        if let Some(e) = encoder {
+            value["encoder"] = json!(e);
+            value["gpu_pipeline"] = json!(matches!(e, "h264_nvenc" | "h264_amf"));
+        }
+        if let Some(n) = frames {
+            value["frames"] = json!(n);
+        }
+        if let Some(n) = seconds {
+            value["seconds"] = json!(n);
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run(
+    request: Request,
+    config: RecordingConfig,
+    source: sources::Source,
+    stop: &AtomicBool,
+    pause: &AtomicBool,
+    status: &Mutex<serde_json::Value>,
+    controls: &Mutex<AudioControls>,
+    replay_request: &Mutex<Option<String>>,
+    annotations: &Mutex<Vec<recorder_engine::overlay::Annotation>>,
+) -> Result<(), String> {
+    #[cfg(windows)]
+    let _apartment = recorder_engine::wasapi::Apartment::initialize().map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    let mut audio = {
+        let mut tracks = Vec::new();
+        if request.system_audio {
+            tracks.push(
+                recorder_engine::wasapi::AudioCapture::open_device(true, &request.system_device)
+                    .map_err(|e| e.to_string())?,
+            );
+        }
+        if request.microphone {
+            tracks.push(
+                recorder_engine::wasapi::AudioCapture::open_device(
+                    false,
+                    &request.microphone_device,
+                )
+                .map_err(|e| e.to_string())?,
+            );
+        }
+        tracks
+    };
+    #[cfg(windows)]
+    let mut processors: Vec<_> = audio
+        .iter()
+        .map(|a| {
+            recorder_engine::audio_processor::AudioProcessor::new(
+                a.rate as i32,
+                a.title == "Microphone" && request.noise_suppression,
+                a.title == "Microphone" && request.noise_gate,
+                request.limiter,
+            )
+        })
+        .collect::<recorder_engine::Result<_>>()
+        .map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    let mix_enabled = request.mix_audio && audio.len() == 2;
+    #[cfg(windows)]
+    let mut mixer = if mix_enabled {
+        Some(recorder_engine::audio_processor::AudioMixer::new(2).map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
+    #[cfg(windows)]
+    let audio_rates: Vec<(i32, &str)> = if mix_enabled {
+        vec![
+            (48000, "Combined audio"),
+            (48000, "System audio"),
+            (48000, "Microphone"),
+        ]
+    } else {
+        audio.iter().map(|a| (48000, a.title)).collect()
+    };
+    #[cfg(not(windows))]
+    let audio_rates: Vec<(i32, &str)> = Vec::new();
+    let handle = if source.kind == "display" {
+        format!("hmonitor={}", source.id)
+    } else {
+        format!("hwnd={}", source.id)
+    };
+    let crop = match request.region {
+        Some([x, y, w, h]) => format!(
+            ":crop_left={x}:crop_top={y}:crop_right={}:crop_bottom={}",
+            source.width - x - w,
+            source.height - y - h
+        ),
+        None => String::new(),
+    };
+    let cursor = u8::from(request.capture_cursor);
+    let base = format!("gfxcapture={handle}:max_framerate={}:capture_cursor={cursor}:resize_mode=scale_aspect{crop},scale_d3d11=width={}:height={}:format=nv12", config.fps, config.width, config.height);
+    let candidates: Vec<&str> = if request.container == "gif" {
+        vec!["gif"]
+    } else if request.annotations_enabled {
+        vec!["libx264"]
+    } else if request.encoder == "auto" {
+        vec!["h264_nvenc", "h264_amf", "h264_qsv", "libx264"]
+    } else {
+        vec![&request.encoder]
+    };
+    let mut chosen = None;
+    let mut failures = Vec::new();
+    for name in candidates {
+        if stop.load(Ordering::Acquire) {
+            update(status, "stopped", None, None, None, None);
+            return Ok(());
+        }
+        let graph = if name == "libx264" || name == "gif" || name == "h264_qsv" {
+            // Some older/integrated GPUs cannot allocate NV12 encoder textures.
+            // Software fallback must also avoid that allocation entirely.
+            let pixel_format = match name {
+                "gif" => "rgb8",
+                "h264_qsv" => "nv12",
+                _ => "yuv420p",
+            };
+            format!("gfxcapture={handle}:max_framerate={}:capture_cursor={cursor}:resize_mode=scale_aspect{crop},hwdownload,format=bgra,scale={}:{}:flags=fast_bilinear,format={pixel_format}", config.fps, config.width, config.height)
+        } else {
+            base.clone()
+        };
+        let attempt: Result<_, String> = (|| {
+            let mut capture = Capture::open(&graph).map_err(|e| e.to_string())?;
+            let began = Instant::now();
+            loop {
+                if stop.load(Ordering::Acquire) {
+                    return Err("Capture canceled".into());
+                }
+                if let Some(first) = capture.next_frame().map_err(|e| e.to_string())? {
+                    let session =
+                        RecordingSession::encoded_with_audio(&config, name, &first, &audio_rates)
+                            .map_err(|e| e.to_string())?;
+                    return Ok((capture, session, first));
+                }
+                if began.elapsed() > Duration::from_secs(8) {
+                    return Err("Capture source did not produce frames".into());
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+        })();
+        match attempt {
+            Ok(tuple) => {
+                chosen = Some((name.to_owned(), tuple));
+                break;
+            }
+            Err(error) => {
+                failures.push(format!("{name}: {error}"));
+                if config.output.exists() {
+                    break;
+                }
+            }
+        }
+    }
+    let (encoder, (mut capture, mut session, mut first)) =
+        chosen.ok_or_else(|| failures.join("; "))?;
+    if request.replay_seconds > 0 {
+        session
+            .enable_replay(request.replay_seconds, request.replay_mib)
+            .map_err(|e| e.to_string())?;
+    }
+    if let Ok(mut value) = status.lock() {
+        value["fallback_reasons"] = json!(failures);
+        value["annotations_enabled"] = json!(request.annotations_enabled);
+    }
+    session
+        .write_video(&mut first, 0)
+        .map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    for track in &mut audio {
+        let _ = track.poll().map_err(|e| e.to_string())?;
+    }
+    let start = Instant::now();
+    let mut paused = Duration::ZERO;
+    let mut pause_start = None;
+    let mut frames = 1;
+    let mut last_pts = 0;
+    let mut last_event = Instant::now();
+    let mut skipped = 0u64;
+    let mut encode_ms = 0.0f64;
+    update(
+        status,
+        "recording",
+        None,
+        Some(&encoder),
+        Some(frames),
+        Some(0.0),
+    );
+    while !stop.load(Ordering::Acquire) {
+        let replay_path = replay_request
+            .lock()
+            .map_err(|_| "Replay control lock failed")?
+            .take();
+        if let Some(path) = replay_path {
+            let result = session.save_replay(std::path::Path::new(&path));
+            if let Ok(mut value) = status.lock() {
+                match result {
+                    Ok(()) => {
+                        value["replay_output"] = json!(path);
+                        value["replay_error"] = json!(null);
+                    }
+                    Err(error) => value["replay_error"] = json!(error.to_string()),
+                }
+            }
+        }
+        let frame = capture.next_frame().map_err(|e| e.to_string())?;
+        #[cfg(windows)]
+        let audio_packets: Vec<Vec<f32>> = audio
+            .iter_mut()
+            .map(|a| a.poll())
+            .collect::<recorder_engine::Result<_>>()
+            .map_err(|e| e.to_string())?;
+        if pause.load(Ordering::Acquire) {
+            if pause_start.is_none() {
+                pause_start = Some(Instant::now());
+                update(status, "paused", None, None, None, None);
+            }
+            thread::sleep(Duration::from_millis(5));
+            continue;
+        }
+        if let Some(began) = pause_start.take() {
+            paused += began.elapsed();
+            update(status, "recording", None, None, None, None);
+        }
+        let elapsed = start.elapsed().saturating_sub(paused);
+        #[cfg(windows)]
+        for (index, raw_samples) in audio_packets.iter().enumerate() {
+            let mut samples = processors[index]
+                .process(raw_samples)
+                .map_err(|e| e.to_string())?;
+            let settings = controls
+                .lock()
+                .map_err(|_| "Audio controls lock failed")?
+                .clone();
+            let system = audio[index].title == "System audio";
+            let gain = if system {
+                if settings.system_muted {
+                    0.0
+                } else {
+                    settings.system_gain
+                }
+            } else if settings.microphone_muted {
+                0.0
+            } else {
+                settings.microphone_gain
+            };
+            for sample in &mut samples {
+                *sample = (*sample * gain).clamp(-1.0, 1.0);
+            }
+            let peak = samples.iter().fold(0.0f32, |max, s| max.max(s.abs()));
+            let rms = if samples.is_empty() {
+                0.0
+            } else {
+                (samples.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>() / samples.len() as f64)
+                    .sqrt()
+            };
+            if let Ok(mut value) = status.lock() {
+                let key = if system {
+                    "system_peak"
+                } else {
+                    "microphone_peak"
+                };
+                let previous = value[key].as_f64().unwrap_or(0.0) as f32;
+                value[key] = json!(peak.max(previous * 0.96));
+                value[if system {
+                    "system_rms"
+                } else {
+                    "microphone_rms"
+                }] = json!(rms);
+            }
+            if let Some(bus) = &mut mixer {
+                bus.push(index, &samples).map_err(|e| e.to_string())?;
+            }
+            session
+                .write_audio(
+                    index + usize::from(mix_enabled),
+                    &samples,
+                    elapsed.as_secs_f64(),
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        #[cfg(windows)]
+        if let Some(bus) = &mut mixer {
+            let combined = bus
+                .until(elapsed.as_secs_f64())
+                .map_err(|e| e.to_string())?;
+            session
+                .write_audio(0, &combined, elapsed.as_secs_f64())
+                .map_err(|e| e.to_string())?;
+        }
+        let pts = (elapsed.as_secs_f64() * f64::from(config.fps)).floor() as i64;
+        if let Some(mut frame) = frame {
+            if pts > last_pts {
+                skipped += (pts - last_pts - 1) as u64;
+                let encoding_started = Instant::now();
+                if request.annotations_enabled {
+                    let marks = annotations.lock().map_err(|_| "Annotation lock failed")?;
+                    frame.annotate(&marks).map_err(|e| e.to_string())?;
+                }
+                session
+                    .write_video(&mut frame, pts)
+                    .map_err(|e| e.to_string())?;
+                encode_ms =
+                    encode_ms * 0.9 + encoding_started.elapsed().as_secs_f64() * 1000.0 * 0.1;
+                frames += 1;
+                last_pts = pts;
+            }
+        } else {
+            thread::sleep(Duration::from_millis(2));
+        }
+        if last_event.elapsed() >= Duration::from_millis(200) {
+            let bytes = config.output.metadata().map(|m| m.len()).unwrap_or(0);
+            if let Ok(mut value) = status.lock() {
+                value["file_bytes"] = json!(bytes);
+                value["skipped_frame_slots"] = json!(skipped);
+                value["encode_ms"] = json!(encode_ms);
+                let (seconds, bytes) = session.replay_status();
+                value["replay_seconds"] = json!(seconds);
+                value["replay_bytes"] = json!(bytes);
+                value["replay_enabled"] = json!(request.replay_seconds > 0);
+            }
+            if (request.max_seconds > 0 && elapsed.as_secs_f64() >= f64::from(request.max_seconds))
+                || (request.max_file_mib > 0
+                    && bytes >= u64::from(request.max_file_mib) * 1024 * 1024)
+            {
+                if let Ok(mut value) = status.lock() {
+                    value["stop_reason"] = json!("Configured recording limit reached");
+                }
+                stop.store(true, Ordering::Release);
+            }
+            update(
+                status,
+                "recording",
+                None,
+                None,
+                Some(frames),
+                Some(elapsed.as_secs_f64()),
+            );
+            last_event = Instant::now();
+        }
+    }
+    update(status, "stopping", None, None, None, None);
+    #[cfg(windows)]
+    for (index, processor) in processors.iter_mut().enumerate() {
+        let mut tail = processor.finish().map_err(|e| e.to_string())?;
+        let settings = controls
+            .lock()
+            .map_err(|_| "Audio controls lock failed")?
+            .clone();
+        let (gain, muted) = if audio[index].title == "System audio" {
+            (settings.system_gain, settings.system_muted)
+        } else {
+            (settings.microphone_gain, settings.microphone_muted)
+        };
+        for sample in &mut tail {
+            *sample = if muted {
+                0.0
+            } else {
+                (*sample * gain).clamp(-1.0, 1.0)
+            };
+        }
+        if let Some(bus) = &mut mixer {
+            bus.push(index, &tail).map_err(|e| e.to_string())?;
+        }
+        session
+            .write_audio(
+                index + usize::from(mix_enabled),
+                &tail,
+                start.elapsed().saturating_sub(paused).as_secs_f64(),
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(windows)]
+    if let Some(bus) = &mut mixer {
+        let clock = start.elapsed().saturating_sub(paused).as_secs_f64() + 0.05;
+        let tail = bus.until(clock).map_err(|e| e.to_string())?;
+        session
+            .write_audio(0, &tail, clock)
+            .map_err(|e| e.to_string())?;
+    }
+    session.finish().map_err(|e| e.to_string())?;
+    update(status, "stopped", None, None, Some(frames), None);
+    Ok(())
+}

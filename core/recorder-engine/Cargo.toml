@@ -1,0 +1,13 @@
+[package]
+name = "recorder-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+recorder-api.workspace = true
+ffmpeg-sys-next.workspace = true
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Media_Audio", "Win32_Media_Multimedia", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant"] }
