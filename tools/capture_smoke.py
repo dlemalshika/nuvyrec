@@ -17,6 +17,9 @@ parser.add_argument('--region', action='store_true')
 parser.add_argument('--pause', action='store_true')
 parser.add_argument('--audio', choices=['none','system','microphone','both'], default='none')
 parser.add_argument('--bundle', type=Path)
+parser.add_argument('--library', type=Path)
+parser.add_argument('--performance', choices=['manual','automatic','eco'], default='manual')
+parser.add_argument('--adaptive', action='store_true', help='Exercise a user-requested resolution/bitrate reduction into a new MKV part')
 parser.add_argument('--features', action='store_true', help='Exercise audio DSP/mix, annotations, replay and auto-stop')
 parser.add_argument('--segments', action='store_true', help='Exercise short independently finalized MKV parts')
 parser.add_argument('--stop-paused', action='store_true', help='Stop while paused and verify paused time is excluded')
@@ -27,7 +30,7 @@ if args.bundle is not None:
 root = Path(__file__).resolve().parent.parent
 sdk = args.bundle or root / '.deps/ffmpeg/ffmpeg-8.1.2-full_build-shared/bin'
 search = os.add_dll_directory(str(sdk))
-library = ctypes.CDLL(str((args.bundle / 'recorder_core.dll') if args.bundle else (root / 'target/debug/recorder_core.dll')))
+library = ctypes.CDLL(str(args.library.resolve() if args.library else ((args.bundle / 'recorder_core.dll') if args.bundle else (root / 'target/debug/recorder_core.dll'))))
 for symbol in ('recorder_sources_json', 'recorder_status_json'):
     getattr(library, symbol).restype = ctypes.c_void_p
 library.recorder_command_json.argtypes = [ctypes.c_char_p]
@@ -64,6 +67,10 @@ config = dict(output=str(output), container=args.format, source_id=source['id'],
               bitrate=2_000_000, encoder='auto')
 config['system_audio'] = args.audio in ('system','both')
 config['microphone'] = args.audio in ('microphone','both')
+config['performance_mode']=args.performance
+config['adaptive_quality']=args.adaptive
+if args.adaptive:
+    config.update(width=1920,height=1080,fps=30)
 replay_output = directory / f'replay-{uuid.uuid4().hex}.mkv'
 if args.features:
     if args.format == 'gif': raise ValueError('Feature test requires H.264')
@@ -77,6 +84,7 @@ command('start', config)
 deadline = time.monotonic() + 25
 started = None
 saved_replay = False
+reduced_quality = False
 try:
     while time.monotonic() < deadline:
         status = read(library.recorder_status_json())
@@ -91,6 +99,9 @@ try:
                     time.sleep(.4)
                     assert read(library.recorder_status_json())['state'] == 'paused'
                     command('resume')
+            if args.adaptive and time.monotonic()-started > 1 and not reduced_quality:
+                command('reduce_quality')
+                reduced_quality = True
             if args.features and time.monotonic() - started > (1 if args.segments else 3) and not saved_replay:
                 command('save_replay')
                 saved_replay = True
@@ -124,10 +135,13 @@ try:
     if args.segments:
         assert len(status['outputs']) >= 2, status
         assert all(Path(path).exists() for path in status['outputs']), status
+    if args.adaptive:
+        assert len(status['outputs']) >= 2 and status['effective_height'] < 1080, status
     print(json.dumps({'file': str(output), 'frames': status['frames'],
                       'encoder': status['encoder'], 'state': status['state'],
                       'replay': str(replay_output) if args.features else None,
                       'outputs': status.get('outputs'),
+                      'effective_profile': [status.get('effective_width'),status.get('effective_height'),status.get('effective_fps')],
                       'stop_reason': status.get('stop_reason')}))
 finally:
     status = read(library.recorder_status_json())

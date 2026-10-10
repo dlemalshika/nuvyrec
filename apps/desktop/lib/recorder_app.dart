@@ -77,6 +77,9 @@ class _RecorderAppState extends State<RecorderApp> {
   }
 
   void _preset(Map<String, dynamic> preset) {
+    if (['automatic', 'eco', 'manual'].contains(preset['performance_mode'])) {
+      features.performanceMode = preset['performance_mode'] as String;
+    }
     maxHeight = (preset['height'] as num? ?? 1080).toInt();
     fps = (preset['fps'] as num? ?? 30).toInt();
     bitrate = (preset['bitrate'] as num? ?? 8).toInt();
@@ -122,6 +125,7 @@ class _RecorderAppState extends State<RecorderApp> {
         'height': maxHeight,
         'fps': fps,
         'bitrate': bitrate,
+        'performance_mode': features.performanceMode,
       });
       if (savedPresets.length > 50) savedPresets.removeAt(0);
     });
@@ -246,6 +250,7 @@ class _RecorderAppState extends State<RecorderApp> {
       'replay_seconds': format == 'gif' ? 0 : features.replaySeconds,
       'annotations_enabled': format != 'gif' && features.annotations,
       'segment_seconds': format == 'mkv' ? features.segmentSeconds : 0,
+      'adaptive_quality': format == 'mkv' && features.adaptiveQuality,
       'cursor_highlight':
           format != 'gif' && mode != 'window' && features.cursorHighlight,
       'click_effects':
@@ -309,6 +314,7 @@ class _RecorderAppState extends State<RecorderApp> {
         sourceControls: _sourceControls(),
         previewSource: previewSource,
         previewEnabled: previewEnabled,
+        performanceMode: features.performanceMode,
         onPreviewToggle: () => setState(() => previewEnabled = !previewEnabled),
         onSettings: () => _showSettings(context),
         onLibrary: () => showRecordingLibrary(context, recorder, mediaJobs),

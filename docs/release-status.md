@@ -1,4 +1,4 @@
-# Frame — Windows feature alpha
+# Frame — Windows performance alpha
 
 This is a runnable Windows screen recorder, not the completed four-platform
 OBS/Bandicam competitor requested in the original specification.
@@ -41,6 +41,11 @@ OBS/Bandicam competitor requested in the original specification.
 - File-size/skipped-frame-slot telemetry and free disk space at file selection.
   Skipped slots are clock gaps, not a count reported by the capture device.
 
+- Automatic PC budgets, Low-resource and Custom modes; GPU capture canvas scaling
+  before readback; effective-quality and CPU/RAM telemetry.
+- Adaptive MKV quality reduction under sustained overload, with finalized parts,
+  cooldown and a manual Reduce recording load action. See [performance](performance.md).
+
 ## Verified on this machine
 
 - Rust compilation, Clippy and configuration/lifecycle regression tests.
@@ -70,6 +75,10 @@ OBS/Bandicam competitor requested in the original specification.
 - Slow-clock audio catch-up and fractional segment-origin timestamp regressions.
 - Actual stop-during-pause capture/replay decoded with paused time excluded.
 
+- Quality policy regressions and actual 1080p to 720p recording transition;
+  both parts and replay fully decoded with three AAC tracks.
+- Low-resource 24 fps region recording using Quick Sync and system audio.
+
 NVENC/AMF paths could not allocate NV12 textures on this machine; the software
 fallback worked and Quick Sync subsequently recorded using CPU-side conversion.
 This does not validate the NVENC/AMF hardware paths on other GPUs. Frame loss was
@@ -83,7 +92,6 @@ observed in short smoke tests; sustained real-time throughput is not guaranteed.
   keystroke overlays. Current drawing takes place inside Frame's preview.
 - Accurate discontinuity/drift correction and long-duration synchronization,
   fault-injection and power-loss recovery tests.
-- Automatic adaptive bitrate and controlled resolution segmentation.
 - Zero-CPU-readback Quick Sync interop and validation on actual NVENC/AMF devices.
 - Full-rate GPU preview, permission recovery, scene/source-layer composition,
   RTMP/SRT streaming with reconnect, automatic captions/smart zoom, modern

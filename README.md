@@ -1,12 +1,12 @@
 # Frame — native screen recorder
 
-Frame is a working **Windows feature alpha** with a Rust/FFmpeg engine and a native
+Frame is a working **Windows performance alpha** with a Rust/FFmpeg engine and a native
 Flutter desktop interface. The original four-platform professional specification
 is still in progress; see [release status](docs/release-status.md) for exact gaps.
 
 ## Run the local Windows build
 
-Open the latest build at `artifacts/Frame-Windows-Features/Frame.exe`. Keep the entire folder together: Flutter
+Open the latest build at `artifacts/Frame-Windows-Performance/Frame.exe`. Keep the entire folder together: Flutter
 assets, recorder_core.dll and the matching FFmpeg runtime DLLs are required.
 Choose a display, window or display region, choose a new output file, then record.
 The main workspace shows a live thumbnail preview. Open **Settings** for video,
@@ -15,6 +15,9 @@ Settings → Appearance lets you select Dark or Light. Your choice is saved for
 the next launch, and can be changed during a recording.
 Pause/resume and stop/save are available while recording. Closing the app during
 recording asks to stop and finalize first.
+
+See [performance modes and validation](docs/performance.md) for Automatic, Low resource,
+Custom and adaptive MKV recording. Start with Automatic on an unfamiliar PC.
 
 ## Current features
 
@@ -56,7 +59,7 @@ See [build instructions](docs/build.md). On the prepared local workspace:
 ```
 
 Packaging defaults to `artifacts/Frame-Windows`. To recreate the feature build
-alongside an open app, use `./tools/package-windows.ps1 -BundleName Frame-Windows-Features`.
+alongside an open app, use `./tools/package-windows.ps1 -BundleName Frame-Windows-Performance`.
 
 The original [architecture plan](docs/architecture.md) explains the target
 monorepo, media ownership and future platform integrations. The current code adds
@@ -67,7 +70,7 @@ has no capture backend; Android/iOS are not implemented.
 ## Remaining work
 
 Webcam/chroma key, Unicode text/keystroke overlays, scene/source layers, streaming,
-automatic captions/smart zoom, adaptive quality, HEVC/AV1/HDR, long-duration sync,
+automatic captions/smart zoom, HEVC/AV1/HDR, long-duration sync,
 full GPU Quick Sync interop, macOS/Android/iOS backends, full-rate GPU preview,
 fault-injection recovery testing, signed installers and sustained low-end/4K120
 validation remain. See [feature status](docs/professional-features.md).

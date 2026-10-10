@@ -44,6 +44,9 @@ impl AudioControls {
 fn enabled() -> bool {
     true
 }
+fn manual_mode() -> String {
+    "manual".into()
+}
 
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -142,6 +145,10 @@ pub struct Request {
     pub click_effects: bool,
     #[serde(default)]
     pub segment_seconds: u32,
+    #[serde(default = "manual_mode")]
+    pub performance_mode: String,
+    #[serde(default)]
+    pub adaptive_quality: bool,
 }
 
 pub struct Worker {
@@ -152,6 +159,7 @@ pub struct Worker {
     pub audio_controls: Arc<Mutex<AudioControls>>,
     pub replay_request: Arc<Mutex<Option<String>>>,
     pub annotations: Arc<Mutex<Vec<recorder_engine::overlay::Annotation>>>,
+    pub reduce_quality: Arc<AtomicBool>,
 }
 
 impl Worker {
@@ -175,7 +183,7 @@ impl Worker {
             "gif" => Container::Gif,
             _ => return Err("Unsupported recording container".into()),
         };
-        let config = RecordingConfig {
+        let mut config = RecordingConfig {
             output: request.output.clone().into(),
             container,
             width: request.width,
@@ -185,6 +193,17 @@ impl Worker {
             encoder_threads: 2,
         };
         config.validate().map_err(str::to_owned)?;
+        if !["automatic", "eco", "manual"].contains(&request.performance_mode.as_str()) {
+            return Err("Unknown performance mode".into());
+        }
+        if request.adaptive_quality && request.container != "mkv" {
+            return Err("Adaptive resolution requires independently finalized MKV parts".into());
+        }
+        crate::performance::Machine::detect().constrain(
+            &mut config,
+            &request.performance_mode,
+            false,
+        );
         request.audio_controls.validate()?;
         if request.segment_seconds != 0
             && (!(2..=3600).contains(&request.segment_seconds) || request.container != "mkv")
@@ -240,6 +259,8 @@ impl Worker {
         let worker_replay = replay_request.clone();
         let annotations = Arc::new(Mutex::new(Vec::new()));
         let worker_annotations = annotations.clone();
+        let reduce_quality = Arc::new(AtomicBool::new(false));
+        let worker_quality = reduce_quality.clone();
         let thread = thread::Builder::new()
             .name("recorder-media".into())
             .spawn(move || {
@@ -254,6 +275,7 @@ impl Worker {
                         &worker_controls,
                         &worker_replay,
                         &worker_annotations,
+                        &worker_quality,
                     )
                 }));
                 let error = match result {
@@ -274,6 +296,7 @@ impl Worker {
             audio_controls,
             replay_request,
             annotations,
+            reduce_quality,
         })
     }
     pub fn finished(&self) -> bool {
@@ -310,7 +333,7 @@ fn update(
 #[allow(clippy::too_many_arguments)]
 fn run(
     request: Request,
-    config: RecordingConfig,
+    mut config: RecordingConfig,
     source: sources::Source,
     stop: &AtomicBool,
     pause: &AtomicBool,
@@ -318,6 +341,7 @@ fn run(
     controls: &Mutex<AudioControls>,
     replay_request: &Mutex<Option<String>>,
     annotations: &Mutex<Vec<recorder_engine::overlay::Annotation>>,
+    reduce_quality: &AtomicBool,
 ) -> Result<(), String> {
     #[cfg(windows)]
     let _apartment = recorder_engine::wasapi::Apartment::initialize().map_err(|e| e.to_string())?;
@@ -388,7 +412,6 @@ fn run(
         None => String::new(),
     };
     let cursor = u8::from(request.capture_cursor);
-    let base = format!("gfxcapture={handle}:max_framerate={}:capture_cursor={cursor}:resize_mode=scale_aspect{crop},scale_d3d11=width={}:height={}:format=nv12", config.fps, config.width, config.height);
     let candidates: Vec<&str> = if request.container == "gif" {
         vec!["gif"]
     } else if request.annotations_enabled || request.cursor_highlight || request.click_effects {
@@ -405,18 +428,14 @@ fn run(
             update(status, "stopped", None, None, None, None);
             return Ok(());
         }
-        let graph = if name == "libx264" || name == "gif" || name == "h264_qsv" {
-            // Some older/integrated GPUs cannot allocate NV12 encoder textures.
-            // Software fallback must also avoid that allocation entirely.
-            let pixel_format = match name {
-                "gif" => "rgb8",
-                "h264_qsv" => "nv12",
-                _ => "yuv420p",
-            };
-            format!("gfxcapture={handle}:max_framerate={}:capture_cursor={cursor}:resize_mode=scale_aspect{crop},hwdownload,format=bgra,scale={}:{}:flags=fast_bilinear,format={pixel_format}", config.fps, config.width, config.height)
-        } else {
-            base.clone()
-        };
+        if name == "libx264" {
+            crate::performance::Machine::detect().constrain(
+                &mut config,
+                &request.performance_mode,
+                true,
+            );
+        }
+        let graph = capture_graph(&config, name, &handle, &crop, cursor);
         let attempt: Result<_, String> = (|| {
             let mut capture = Capture::open(&graph).map_err(|e| e.to_string())?;
             let began = Instant::now();
@@ -479,9 +498,20 @@ fn run(
     let mut segment_number = 1u32;
     let mut current_path = config.output.clone();
     let mut finalized_bytes = 0u64;
+    let machine = crate::performance::Machine::detect();
+    let mut monitor = crate::performance::Monitor::new(machine.logical_cores);
+    let mut governor = crate::performance::Governor::new();
+    let mut last_load = Instant::now();
+    let mut next_quality = None;
     if let Ok(mut value) = status.lock() {
         value["outputs"] = json!([config.output]);
         value["segment_durations"] = json!({});
+        value["effective_width"] = json!(config.width);
+        value["effective_height"] = json!(config.height);
+        value["effective_fps"] = json!(config.fps);
+        value["effective_bitrate"] = json!(config.bitrate);
+        value["performance_mode"] = json!(request.performance_mode);
+        value["adaptive_quality"] = json!(request.adaptive_quality);
     }
     #[cfg(windows)]
     let mut mouse_down = false;
@@ -512,7 +542,7 @@ fn run(
                 }
             }
         }
-        let frame = capture.next_frame().map_err(|e| e.to_string())?;
+        let mut frame = capture.next_frame().map_err(|e| e.to_string())?;
         #[cfg(windows)]
         let audio_packets: Vec<Vec<f32>> = audio
             .iter_mut()
@@ -532,8 +562,19 @@ fn run(
             update(status, "recording", None, None, None, None);
         }
         let elapsed = start.elapsed().saturating_sub(paused);
-        if request.segment_seconds > 0
-            && elapsed.as_secs_f64() - segment_start >= f64::from(request.segment_seconds)
+        if request.adaptive_quality && reduce_quality.swap(false, Ordering::AcqRel) {
+            next_quality = crate::performance::lower_quality(&config);
+            if let Ok(mut value) = status.lock() {
+                value["performance_notice"] = json!(if next_quality.is_some() {
+                    "Lower quality requested: starting a new MKV part"
+                } else {
+                    "Already at the minimum adaptive profile"
+                });
+            }
+        }
+        if next_quality.is_some()
+            || (request.segment_seconds > 0
+                && elapsed.as_secs_f64() - segment_start >= f64::from(request.segment_seconds))
         {
             if segment_number >= 1024 {
                 if let Ok(mut value) = status.lock() {
@@ -541,7 +582,7 @@ fn run(
                 }
                 break;
             }
-            if let Some(ref first) = frame {
+            if frame.is_some() {
                 #[cfg(windows)]
                 if let Some(bus) = &mut mixer {
                     drain_mix(&mut session, bus, elapsed.as_secs_f64(), segment_start)?;
@@ -561,10 +602,39 @@ fn run(
                 filename.push(format!("-part{segment_number:04}.mkv"));
                 current_path = config.output.with_file_name(filename);
                 let mut next = config.clone();
+                if let Some(quality) = next_quality.take() {
+                    next = quality;
+                    config = next.clone();
+                    // Free the old capture pool before opening a smaller one.
+                    drop(capture);
+                    capture =
+                        Capture::open(&capture_graph(&config, &encoder, &handle, &crop, cursor))
+                            .map_err(|e| e.to_string())?;
+                    let began = Instant::now();
+                    loop {
+                        frame = capture.next_frame().map_err(|e| e.to_string())?;
+                        if frame.is_some() {
+                            break;
+                        }
+                        if stop.load(Ordering::Acquire) || began.elapsed() > Duration::from_secs(8)
+                        {
+                            return Err(
+                                "Adaptive capture reinitialization canceled or timed out".into()
+                            );
+                        }
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    last_pts = (elapsed.as_secs_f64() * f64::from(config.fps)).floor() as i64 - 1;
+                    encode_ms = 0.0;
+                }
                 next.output = current_path.clone();
-                session =
-                    RecordingSession::encoded_with_audio(&next, &encoder, first, &audio_rates)
-                        .map_err(|e| e.to_string())?;
+                session = RecordingSession::encoded_with_audio(
+                    &next,
+                    &encoder,
+                    frame.as_ref().ok_or("No adaptive frame")?,
+                    &audio_rates,
+                )
+                .map_err(|e| e.to_string())?;
                 if request.replay_seconds > 0 {
                     session
                         .enable_replay(request.replay_seconds, request.replay_mib)
@@ -573,6 +643,10 @@ fn run(
                 segment_start = elapsed.as_secs_f64();
                 if let Ok(mut value) = status.lock() {
                     value["current_output"] = json!(current_path);
+                    value["effective_width"] = json!(config.width);
+                    value["effective_height"] = json!(config.height);
+                    value["effective_fps"] = json!(config.fps);
+                    value["effective_bitrate"] = json!(config.bitrate);
                     if let Some(outputs) = value["outputs"].as_array_mut() {
                         outputs.push(json!(current_path));
                     }
@@ -580,6 +654,20 @@ fn run(
             }
         }
         let segment_clock = elapsed.as_secs_f64() - segment_start;
+        if last_load.elapsed() >= Duration::from_secs(5) {
+            let load = monitor.sample();
+            if request.adaptive_quality && next_quality.is_none() {
+                next_quality = governor.observe(&config, &load, encode_ms);
+            }
+            if let Ok(mut value) = status.lock() {
+                value["load"] = json!(load);
+                if next_quality.is_some() {
+                    value["performance_notice"] =
+                        json!("Sustained overload: lowering quality in a new MKV part");
+                }
+            }
+            last_load = Instant::now();
+        }
         #[cfg(windows)]
         let cursor =
             if source.kind == "display" && (request.cursor_highlight || request.click_effects) {
@@ -802,6 +890,27 @@ fn segment_video_pts(absolute: i64, origin: f64, fps: u32) -> i64 {
 
 fn active_duration(elapsed: Duration, paused: Duration, current_pause: Duration) -> Duration {
     elapsed.saturating_sub(paused.saturating_add(current_pause))
+}
+
+fn capture_graph(
+    config: &RecordingConfig,
+    name: &str,
+    handle: &str,
+    crop: &str,
+    cursor: u8,
+) -> String {
+    // Scale the BGRA GPU canvas before any readback. A 4K source recorded at
+    // 720p transfers only the 720p canvas to RAM on software/QSV paths.
+    let source=format!("gfxcapture={handle}:max_framerate={}:width={}:height={}:capture_cursor={cursor}:resize_mode=scale_aspect{crop}",config.fps,config.width,config.height);
+    match name {
+        "libx264" => format!("{source},hwdownload,format=bgra,format=yuv420p"),
+        "h264_qsv" => format!("{source},hwdownload,format=bgra,format=nv12"),
+        "gif" => format!("{source},hwdownload,format=bgra,format=rgb8"),
+        _ => format!(
+            "{source},scale_d3d11=width={}:height={}:format=nv12",
+            config.width, config.height
+        ),
+    }
 }
 
 #[cfg(windows)]

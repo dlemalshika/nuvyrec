@@ -1,4 +1,5 @@
 //! Native control plane. JSON carries configuration/status only, never pixels.
+mod performance;
 mod sources;
 mod worker;
 use serde_json::json;
@@ -21,7 +22,9 @@ pub extern "C" fn recorder_abi_version() -> u32 {
 }
 #[no_mangle]
 pub extern "C" fn recorder_sources_json() -> *mut c_char {
-    guard(|| json!({"ok":true,"sources":sources::enumerate(),"platform":std::env::consts::OS}))
+    guard(
+        || json!({"ok":true,"sources":sources::enumerate(),"platform":std::env::consts::OS,"performance":performance::Machine::detect()}),
+    )
 }
 /// # Safety
 /// text must be a valid NUL-terminated UTF-8 C string during this call. The
@@ -62,6 +65,21 @@ pub unsafe extern "C" fn recorder_command_json(text: *const c_char) -> *mut c_ch
                     }
                     Err(e) => json!({"ok":false,"error":e}),
                 }
+            }
+            "reduce_quality" => {
+                let Some(worker) = locked.as_ref().filter(|w| !w.finished()) else {
+                    return json!({"ok":false,"error":"No active recording"});
+                };
+                if worker
+                    .status
+                    .lock()
+                    .map(|s| s["adaptive_quality"] != true)
+                    .unwrap_or(true)
+                {
+                    return json!({"ok":false,"error":"Enable adaptive MKV quality before recording"});
+                }
+                worker.reduce_quality.store(true, Ordering::Release);
+                json!({"ok":true})
             }
             "annotations" => {
                 let Some(worker) = locked.as_ref().filter(|w| !w.finished()) else {

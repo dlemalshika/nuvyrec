@@ -1,6 +1,6 @@
 # Windows feature build
 
-Run `artifacts/Frame-Windows-Features/Frame.exe`, keeping the bundle together.
+Run `artifacts/Frame-Windows-Performance/Frame.exe`, keeping the bundle together.
 
 ## Recording
 
@@ -14,7 +14,8 @@ Ctrl+Shift+F9 starts/stops, F10 pauses/resumes, F11 saves replay. Settings repor
 shortcut conflicts. The tray menu provides the same controls and restores Frame.
 
 The Low-end PC preset selects 720p/24fps/3Mbps. Keep optional CPU effects off and
-disable the thumbnail preview when resources are scarce. Hardware encoding is
+Low-resource mode suspends the thumbnail preview during recording. See
+[performance controls](performance.md) for automatic budgets and adaptive MKV parts. Hardware encoding is
 negotiated against the installed driver; a selected encoder can be unavailable.
 
 ## Audio and effects

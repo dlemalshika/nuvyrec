@@ -22,5 +22,5 @@ for path in args.files:
     subprocess.run([str(args.bundle.resolve() / 'ffmpeg.exe'), '-v', 'error', '-i',
         str(path.resolve()), '-map', '0', '-f', 'null', '-'], check=True,
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-    print(json.dumps({'file':path.name,'video':video[0]['codec_name'], 'audio_tracks':len(audio),
+    print(json.dumps({'file':path.name,'video':video[0]['codec_name'], 'width':video[0]['width'], 'height':video[0]['height'], 'audio_tracks':len(audio),
         'seconds':metadata['format'].get('duration'),'decode':'passed'}))

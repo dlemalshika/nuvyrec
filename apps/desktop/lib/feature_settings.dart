@@ -29,6 +29,55 @@ class FeatureSettings extends StatelessWidget {
     return Column(
       children: [
         ExpansionTile(
+          title: const Text('Performance & PC compatibility'),
+          subtitle: const Text(
+            'Automatic budgets, low-resource mode and adaptive quality',
+          ),
+          childrenPadding: const EdgeInsets.all(16),
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: options.performanceMode,
+              decoration: const InputDecoration(labelText: 'Performance mode'),
+              items: const [
+                DropdownMenuItem(
+                  value: 'automatic',
+                  child: Text('Automatic · conservative PC budget'),
+                ),
+                DropdownMenuItem(
+                  value: 'eco',
+                  child: Text('Low resource · minimal recording cost'),
+                ),
+                DropdownMenuItem(
+                  value: 'manual',
+                  child: Text('Custom / maximum · use selected quality'),
+                ),
+              ],
+              onChanged: active
+                  ? null
+                  : (v) => change(() => options.performanceMode = v!),
+            ),
+            const SizedBox(height: 12),
+            if (recorder.machine.isNotEmpty)
+              Text(
+                '${recorder.machine['logical_cores']} logical CPUs · ${((recorder.machine['total_memory_mib'] as num? ?? 0) / 1024).toStringAsFixed(1)} GiB RAM\nSuggested budget: ${recorder.machine['recommended_height']}p / ${recorder.machine['recommended_fps']} fps',
+              ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Reduce quality under sustained overload'),
+              subtitle: const Text(
+                'MKV only. Saves a new part before lowering resolution/FPS/bitrate. No automatic quality increase.',
+              ),
+              value: options.adaptiveQuality,
+              onChanged: active
+                  ? null
+                  : (v) => change(() => options.adaptiveQuality = v),
+            ),
+            const Text(
+              'Automatic chooses up to 720p/24fps on constrained PCs and 1080p/30fps otherwise. Custom keeps your selected quality, including 4K/120fps; actual capability depends on the GPU/driver. Low-resource mode suspends preview while recording. Optional effects add CPU cost.',
+            ),
+          ],
+        ),
+        ExpansionTile(
           title: const Text('Presets & recording controls'),
           subtitle: const Text('Countdown, capture cursor and hotkeys'),
           childrenPadding: const EdgeInsets.all(16),
@@ -40,13 +89,21 @@ class FeatureSettings extends StatelessWidget {
                 for (final preset in [
                   {
                     'name': 'Low-end PC',
+                    'performance_mode': 'eco',
                     'height': 720,
                     'fps': 24,
                     'bitrate': 3,
                   },
-                  {'name': 'Tutorial', 'height': 1080, 'fps': 30, 'bitrate': 8},
+                  {
+                    'name': 'Tutorial',
+                    'height': 1080,
+                    'fps': 30,
+                    'bitrate': 8,
+                    'performance_mode': 'automatic',
+                  },
                   {
                     'name': 'High quality',
+                    'performance_mode': 'manual',
                     'height': 2160,
                     'fps': 60,
                     'bitrate': 20,

@@ -22,6 +22,7 @@ class RecorderController extends ChangeNotifier {
   void notifyLibraryChanged() => notifyListeners();
   Map<String, dynamic> status = {'state': 'idle'};
   List<Map<String, dynamic>> sources = [];
+  Map<String, dynamic> machine = {};
   String? error;
   String? output;
   static const host = MethodChannel('org.screenrecorder/host');
@@ -305,6 +306,7 @@ class RecorderController extends ChangeNotifier {
   void refreshSources() {
     try {
       final result = _native!.sources();
+      machine = Map<String, dynamic>.from(result['performance'] as Map? ?? {});
       sources = (result['sources'] as List)
           .cast<Map>()
           .map((s) => Map<String, dynamic>.from(s))
@@ -352,6 +354,9 @@ class RecorderController extends ChangeNotifier {
     }
     _send({'action': action});
   }
+
+  /// Finalizes the current MKV part before reducing recording quality.
+  void lowerQuality() => action('reduce_quality');
 
   void _send(Map<String, dynamic> message) {
     try {

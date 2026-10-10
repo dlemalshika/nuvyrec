@@ -18,6 +18,7 @@ class RecorderWorkspace extends StatelessWidget {
     required this.summary,
     required this.format,
     required this.onStart,
+    this.performanceMode = 'manual',
   });
   final RecorderController recorder;
   final Widget sourceControls;
@@ -25,6 +26,7 @@ class RecorderWorkspace extends StatelessWidget {
   final bool previewEnabled;
   final VoidCallback onPreviewToggle, onSettings, onStart, onLibrary;
   final String summary, format;
+  final String performanceMode;
 
   @override
   Widget build(BuildContext context) {
@@ -283,7 +285,9 @@ class RecorderWorkspace extends StatelessWidget {
                             child: AnnotationPreview(
                               recorder: recorder,
                               source: previewSource,
-                              enabled: previewEnabled,
+                              enabled:
+                                  previewEnabled &&
+                                  !(active && performanceMode == 'eco'),
                             ),
                           ),
                           const SizedBox(height: 14),
@@ -464,6 +468,27 @@ class _RecordingHealth extends StatelessWidget {
             'Recording health',
             style: TextStyle(fontWeight: FontWeight.w600),
           ),
+          if (status['effective_height'] is num)
+            Text(
+              '${status['effective_width']} × ${status['effective_height']} · ${status['effective_fps']} fps · ${((status['effective_bitrate'] as num? ?? 0) / 1000000).toStringAsFixed(1)} Mbps',
+              style: TextStyle(fontSize: 11, color: colors.muted),
+            ),
+          if (status['load'] is Map) ...[
+            Text(
+              'App RAM: ${(status['load'] as Map)['process_memory_mib']} MiB · available: ${(status['load'] as Map)['available_memory_mib']} MiB',
+              style: TextStyle(fontSize: 11, color: colors.muted),
+            ),
+            if ((status['load'] as Map)['process_cpu'] is num)
+              Text(
+                'App CPU: ${(((status['load'] as Map)['process_cpu'] as num) * 100).toStringAsFixed(0)}% · encode ${((status['encode_ms'] as num?) ?? 0).toStringAsFixed(1)} ms',
+                style: TextStyle(fontSize: 11, color: colors.muted),
+              ),
+          ],
+          if (status['performance_notice'] is String)
+            Text(
+              status['performance_notice'] as String,
+              style: TextStyle(fontSize: 11, color: colors.accent),
+            ),
           const SizedBox(height: 12),
           for (final item in [
             ('System audio', 'system_peak'),
@@ -476,6 +501,13 @@ class _RecordingHealth extends StatelessWidget {
             ),
             const SizedBox(height: 10),
           ],
+          if (recorder.state == 'recording' &&
+              status['adaptive_quality'] == true)
+            TextButton.icon(
+              onPressed: recorder.lowerQuality,
+              icon: const Icon(Icons.speed, size: 16),
+              label: const Text('Reduce recording load'),
+            ),
           Text(
             '${((status['file_bytes'] as num? ?? 0) / 1048576).toStringAsFixed(1)} MiB recorded · ${status['skipped_frame_slots'] ?? 0} skipped frame slots',
             style: TextStyle(fontSize: 11, color: colors.muted),

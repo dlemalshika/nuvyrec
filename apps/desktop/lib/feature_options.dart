@@ -10,6 +10,8 @@ class FeatureOptions {
   bool captureCursor = true;
   bool annotations = false;
   bool cursorHighlight = false, clickEffects = false;
+  String performanceMode = 'automatic';
+  bool adaptiveQuality = true;
   Map<String, dynamic> get audioControls => {
     'system_gain': systemGain,
     'microphone_gain': microphoneGain,
@@ -34,6 +36,8 @@ class FeatureOptions {
     'cursor_highlight': cursorHighlight,
     'click_effects': clickEffects,
     'segment_seconds': segmentSeconds,
+    'performance_mode': performanceMode,
+    'adaptive_quality': adaptiveQuality,
   };
   void restore(Map<String, dynamic> data) {
     int bounded(String key, int fallback, int max) =>
@@ -47,6 +51,13 @@ class FeatureOptions {
     replayMiB = bounded('replay_mib', 32, 128).clamp(4, 128);
     segmentSeconds = bounded('segment_seconds', 0, 3600);
     if (![0, 60, 300, 900].contains(segmentSeconds)) segmentSeconds = 0;
+    performanceMode =
+        ['automatic', 'eco', 'manual'].contains(data['performance_mode'])
+        ? data['performance_mode'] as String
+        : 'automatic';
+    adaptiveQuality = data['adaptive_quality'] is bool
+        ? data['adaptive_quality'] as bool
+        : true;
     systemDevice = data['system_device'] is String
         ? data['system_device'] as String
         : '';
