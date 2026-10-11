@@ -6,11 +6,13 @@ use ffmpeg_sys_next as av;
 use std::sync::Arc;
 
 pub const MAX_LAYERS: usize = 4;
-pub const MAX_BANK_BYTES: usize = 4 * 1024 * 1024;
+// Reserve both the straight-alpha GPU upload and cached CPU fallback colors.
+pub const MAX_BANK_BYTES: usize = 8 * 1024 * 1024;
 pub struct Raster {
     pub width: usize,
     pub height: usize,
     yuva: Vec<[u8; 4]>,
+    rgba: Vec<u8>,
 }
 impl Raster {
     pub fn rgba(width: usize, height: usize, bytes: &[u8]) -> Result<Self> {
@@ -48,10 +50,14 @@ impl Raster {
             width,
             height,
             yuva,
+            rgba: bytes.to_vec(),
         })
     }
     pub fn bytes(&self) -> usize {
-        self.yuva.len() * 4
+        self.yuva.len() * 4 + self.rgba.len()
+    }
+    pub(crate) fn gpu_rgba(&self) -> &[u8] {
+        &self.rgba
     }
 }
 /// x/y are anchors in remaining free space (0 = left/top, 1 = right/bottom).

@@ -124,7 +124,7 @@ void main() {
     recorder.dispose();
   });
   testWidgets(
-    'creator layouts restore Unicode layers and select software encoding',
+    'creator layouts restore Unicode layers and preserve automatic encoding',
     (tester) async {
       tester.view.physicalSize = const Size(1280, 900);
       tester.view.devicePixelRatio = 1;
@@ -157,7 +157,7 @@ void main() {
       await tester.pump();
       expect(recorder.received?['layers_enabled'], true);
       expect(recorder.received?['shortcut_overlay'], true);
-      expect(recorder.received?['encoder'], 'libx264');
+      expect(recorder.received?['encoder'], 'auto');
       await tester.pumpWidget(const SizedBox());
       recorder.dispose();
     },

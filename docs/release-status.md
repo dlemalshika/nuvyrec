@@ -6,6 +6,9 @@ OBS/Bandicam competitor requested in the original specification.
 ## Implemented
 
 - Flutter native Windows executable with a Rust shared-library engine.
+- RTMP/RTMPS multistream to YouTube/Facebook/TikTok destinations, shared H.264/AAC
+  encoding with local MKV/MP4, bounded queues and independent reconnect. Keys
+  are masked and kept in memory only. See [live setup and limits](live-streaming.md).
 - Windows.Graphics.Capture display/window sources and custom display regions.
 - H.264 recording to MKV, MP4 and AVI, plus low-resolution animated GIF.
 - Start, pause, resume, explicit stop/finalization and guarded app shutdown.
@@ -42,7 +45,7 @@ OBS/Bandicam competitor requested in the original specification.
 - Draw/arrow/box/spotlight annotations placed on the preview and composited into
   recorded YUV420P frames. Maximum 64 objects, 256 points per object, one spotlight.
   Cursor highlight/click rings support display/region recording. These optional
-  effects explicitly use software encoding and increase CPU work.
+  effects use D3D11 GPU composition when available, with CPU fallback.
 - Optional MKV recovery segments: completed files are finalized/synced individually;
   up to 1024 parts. The active file remains vulnerable to abrupt failure. Replay
   history restarts at every segment. Segments may have small boundary timing gaps.
@@ -65,10 +68,34 @@ OBS/Bandicam competitor requested in the original specification.
   function keys; ordinary typed text and clipboard contents are excluded.
 - Non-blocking native WGC/D3D11 sampling with one retained GPU surface. Static
   windows continue recording without delaying worker stop/audio/control polling.
-  Webcam is opt-in and uses software encoding. See [webcam limitations](webcam.md).
+  Webcam is opt-in. See [webcam limitations](webcam.md).
+- D3D11 composition of camera mirror/green key, raster layers, annotation geometry,
+  spotlight and cursor effects before encoder conversion. Hardware encoder choice
+  is retained; CPU composition is an initialization fallback for software H.264.
+  See [GPU composition](gpu-composition.md) for bounds and remaining readback.
 
 ## Verified on this machine
 
+- Multistream revision: thirty-three Rust tests and twenty-two Flutter tests
+  passed; Clippy with warnings denied and Flutter analysis passed. Synthetic
+  loopback tests delivered decodable H.264/AAC to three receivers simultaneously,
+  isolated a stalled connection, reconnected a restarted receiver, and stopped
+  publishing while a ten-second local recording continued. Local independent
+  audio tracks were preserved. A generated untrusted TLS certificate was
+  rejected before any RTMP payload was sent; platform account ingest is untested.
+- The packaged native JSON FFI sent an owned synthetic window to three loopback
+  receivers with silent AAC and no audio devices. Secret-free status, live pause
+  protection, Stop-live, window preview, GPU effects and in-place crop passed.
+  Packaged startup exited cleanly; all 51 bundle checksums were verified.
+- GpuOverlays revision: thirty Rust tests, nineteen Flutter tests, Clippy with
+  warnings denied and Flutter analysis passed. Generated camera pixels and an
+  owned synthetic window verified GPU geometry, alpha, mirror/key, overlay clear
+  and spotlight shading; client-area sampling uses physical DPI coordinates.
+- Final packaged owned-window take used D3D11 composition with Intel Quick Sync,
+  recorded 71 frames at 640 × 360 / 24 fps, and decoded completely. All 618
+  expected Sinhala/Unicode glyph pixels matched; logo alpha/background passed.
+  Capture-to-preview handoff passed after releasing cached WinRT factories before
+  apartment shutdown.
 - ExportPresets revision: nineteen Flutter tests and analysis passed. Synthetic
   videos exported with all four share presets and decoded successfully; output
   dimensions, high/low frame rates, black padding, no upscaling, audio selection,
@@ -144,8 +171,8 @@ observed in short smoke tests; sustained real-time throughput is not guaranteed.
 - Accurate discontinuity/drift correction and long-duration synchronization,
   fault-injection and power-loss recovery tests.
 - Zero-CPU-readback Quick Sync interop and validation on actual NVENC/AMF devices.
-- Full-rate GPU preview, permission recovery, scene/source-layer composition,
-  RTMP/SRT streaming with reconnect, automatic captions/smart zoom, modern
+- Full-rate GPU preview, permission recovery, multiple capture-source composition,
+  real-platform RTMPS ingest validation, SRT, automatic captions/smart zoom, modern
   codecs/HDR, installers and reproducible release CI.
 - Verified low-end hardware limits and sustained 4K/120 performance measurements.
 

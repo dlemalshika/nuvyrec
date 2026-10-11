@@ -14,12 +14,17 @@ import subprocess
 import threading
 import time
 import uuid
+import socket
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--library', type=Path, required=True)
 parser.add_argument('--pan-probe', type=Path, required=True)
+parser.add_argument('--gpu-probe', type=Path, help='Validate GPU overlays with synthetic camera pixels; no real camera is opened')
 parser.add_argument('--webcam-preview', action='store_true', help='Opt-in real camera: verify shared preview/recording and live overlay hide/show; no thumbnail is saved or displayed')
+parser.add_argument('--multistream', action='store_true', help='Use three loopback receivers to verify native FFI live control and silent AAC; no account or audio device is accessed')
 args = parser.parse_args()
+if args.multistream and args.webcam_preview:
+    parser.error('Run synthetic multistream and real camera checks separately')
 root = Path(__file__).resolve().parent.parent
 sdk = root / '.deps/ffmpeg/ffmpeg-8.1.2-full_build-shared/bin'
 search = os.add_dll_directory(str(sdk))
@@ -51,6 +56,7 @@ gdi.CreateSolidBrush.argtypes=[w.DWORD];gdi.CreateSolidBrush.restype=w.HBRUSH
 gdi.DeleteObject.argtypes=[w.HGDIOBJ]
 ready=threading.Event()
 fixture={}
+stream_receivers=[]
 @PROC
 def procedure(hwnd,message,wp,lp):
     if message==0x000f:  # WM_PAINT; colored quadrants reach every client edge
@@ -138,6 +144,20 @@ try:
     assert not source['minimized'] and source['width']>=640 and source['height']>360
     config=dict(output=str(directory/'full-window.mkv'),container='mkv',source_kind='window',source_id=source['id'],
                 width=source['width']//2*2,height=source['height']//2*2,fps=30,bitrate=2_000_000,encoder='libx264')
+    if args.multistream:
+        targets=[]
+        for index,platform in enumerate(['youtube','facebook','tiktok']):
+            with socket.socket() as sock:
+                sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
+            server=f'rtmp://127.0.0.1:{port}/live'
+            targets.append(dict(platform=platform,server=server,key='frame-owned-test-key'))
+            child=subprocess.Popen([str(sdk/'ffmpeg.exe'),'-nostdin','-v','error',
+                '-analyzeduration','500000','-probesize','32768','-listen','1','-i',server+'/frame-owned-test-key',
+                '-c','copy','-flush_packets','1','-f','flv',str(directory/f'stream-{index}.flv')],
+                stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            stream_receivers.append(child)
+        config.update(streaming=targets)
+        time.sleep(.6)
     if args.webcam_preview:
         library.recorder_cameras_json.restype=c.c_void_p
         library.recorder_webcam_preview_request_json.argtypes=[c.c_char_p];library.recorder_webcam_preview_request_json.restype=c.c_void_p
@@ -155,11 +175,23 @@ try:
         config.update(webcam=webcam,performance_mode='eco')
     response=command('start',config);assert response['ok'],response
     hidden=shown=False
+    streams_stopped=False
     deadline=time.monotonic()+12
     while time.monotonic()<deadline:
         status=read(library.recorder_status_json())
         if status['state']=='failed':raise RuntimeError(status['error'])
-        if args.webcam_preview and status['state']=='recording':
+        if args.multistream and status['state']=='recording':
+            assert 'frame-owned-test-key' not in json.dumps(status),'Credentials leaked into status'
+            if status['seconds']>3 and not streams_stopped:
+                streams=status.get('streaming',[])
+                assert len(streams)==3 and all(s['state']=='sending' and s['packets']>0 for s in streams),streams
+                assert not command('pause')['ok'],'Pause interrupted live timestamps'
+                assert command('stop_streaming')['ok']
+                streams_stopped=True
+            if status['seconds']>5:
+                assert streams_stopped and not status['streaming_active'],status
+                break
+        elif args.webcam_preview and status['state']=='recording':
             assert not status.get('webcam_error'),status.get('webcam_error')
             camera_frame()
             if status['seconds']>.4 and not hidden:
@@ -176,6 +208,32 @@ try:
     deadline=time.monotonic()+10
     while time.monotonic()<deadline and read(library.recorder_status_json())['state']!='stopped':time.sleep(.1)
     assert read(library.recorder_status_json())['state']=='stopped'
+    if args.multistream:
+        for index,child in enumerate(stream_receivers):
+            child.wait(timeout=8)
+            path=directory/f'stream-{index}.flv'
+            info=json.loads(subprocess.check_output([str(sdk/'ffprobe.exe'),'-v','error','-show_streams','-show_format','-of','json',str(path)]))
+            assert [s['codec_name'] for s in info['streams']]==['h264','aac'],info
+            assert 2<float(info['format']['duration'])<4.5,info
+            subprocess.run([str(sdk/'ffmpeg.exe'),'-nostdin','-v','error','-i',str(path),'-f','null','-'],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+        print('Native FFI multistream: three receivers, silent AAC, secret-free status, pause guard and Stop live passed')
+    if args.gpu_probe:
+        subprocess.run([str(args.gpu_probe.resolve()),str(fixture['hwnd']),str(directory)],check=True)
+        def gpu_rgb(label):
+            data=subprocess.check_output([str(sdk/'ffmpeg.exe'),'-v','error','-i',str(directory/f'gpu-{label}.png'),'-frames:v','1','-f','rawvideo','-pix_fmt','rgb24','-'])
+            assert len(data)==320*180*3
+            return lambda x,y:tuple(data[(y*320+x)*3:(y*320+x)*3+3])
+        composed=gpu_rgb('composite')
+        assert composed(160,45)[1]>220 and composed(160,45)[0]<30,'GPU line not drawn'
+        assert is_red(composed(10,120)),'Transparent GPU raster damaged background'
+        assert all(abs(a-b)<12 for a,b in zip(composed(60,120),(255,128,128))),'GPU raster alpha incorrect'
+        assert composed(260,120)[0]>220 and composed(260,120)[2]>220,'GPU webcam mirror incorrect'
+        assert is_blue(composed(310,120)),'GPU chroma key did not preserve background'
+        cleared=gpu_rgb('clear')
+        assert is_blue(cleared(260,120)) and is_blue(cleared(160,45)),'GPU clear retained stale overlays'
+        spot=gpu_rgb('spotlight')
+        assert is_red(spot(80,45)) and 65<spot(200,45)[2]<100,'GPU spotlight shading incorrect'
+        print('GPU composition: geometry, raster alpha, synthetic camera mirror/key, clear and spotlight passed')
     # Source-size aspect thumbnail, returned independently of the media thread.
     ratio=min(480/source['width'],270/source['height'])
     request=dict(id=source['id'],width=round(source['width']*ratio),height=round(source['height']*ratio))
@@ -190,7 +248,7 @@ try:
             finally:library.recorder_preview_free(pointer,length.value)
             break
         time.sleep(.2)
-    else:raise RuntimeError('Window thumbnail did not arrive')
+    else:raise RuntimeError(f'Window thumbnail did not arrive: {response}')
     for path in [directory/'preview.png',directory/'full-window.mkv']:
         pixel=rgb(path)
         assert is_red(pixel(40,80)) and is_blue(pixel(120,80)),str(path)
@@ -213,6 +271,9 @@ try:
     print(json.dumps({'result':'passed','full_window':True,'native_preview':True,'minimized_rejected':True,'same_graph_pan':True,'webcam_preview_frames':preview_frames,'webcam_hide_show':hidden and shown,'fixture_artifacts':str(directory)}))
 finally:
     command('stop')
+    for child in stream_receivers:
+        if child.poll() is None:
+            child.terminate();child.wait(timeout=5)
     if camera_request is not None:
         read(library.recorder_webcam_preview_request_json(json.dumps(dict(webcam=dict(enabled=False),low_resource=True)).encode()))
     user.PostMessageW(fixture['hwnd'],0x0010,0,0)

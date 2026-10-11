@@ -19,6 +19,8 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <array>
+#include <vector>
 #include <stdexcept>
 extern "C" {
 #include <libavutil/hwcontext.h>
@@ -39,9 +41,21 @@ struct FrameCaptureOptions {
     uint32_t left, top, right, bottom;
 };
 namespace {
+struct PhysicalCoordinates {
+    DPI_AWARENESS_CONTEXT previous = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    ~PhysicalCoordinates() { if(previous) SetThreadDpiAwarenessContext(previous); }
+};
 struct Apartment {
+    // WGC surfaces and DWM bounds are physical pixels. GetClientRect and
+    // ClientToScreen must use the same units, including CLI/test callers.
+    PhysicalCoordinates coordinates;
     Apartment() { winrt::init_apartment(winrt::apartment_type::multi_threaded); }
-    ~Apartment() { winrt::uninit_apartment(); }
+    ~Apartment() {
+        // Cached activation factories can retain apartment-bound proxies after
+        // the final RoUninitialize. Release the cache while COM is still alive.
+        winrt::clear_factory_cache();
+        winrt::uninit_apartment();
+    }
 };
 struct AvRef {
     AVBufferRef* value = nullptr;
@@ -82,6 +96,10 @@ float4 pixel(Vertex v) : SV_TARGET {
 }
 )";
 
+// Kept in this owning translation unit so the compositor uses the exact same
+// device/context and FFmpeg lock as capture and hardware conversion.
+#include "gpu_compositor.h"
+
 class Capture {
     Apartment apartment;
     AvRef deviceRef, framesRef;
@@ -97,6 +115,7 @@ class Capture {
     ComPtr<ID3D11RasterizerState> rasterizer;
     ComPtr<ID3D11DepthStencilState> depth;
     ComPtr<ID3D11BlendState> blend;
+    std::unique_ptr<GpuCompositor> compositor;
     IDirect3DDevice runtimeDevice{nullptr};
     GraphicsCaptureItem item{nullptr};
     Direct3D11CaptureFramePool pool{nullptr};
@@ -110,7 +129,10 @@ public:
     explicit Capture(FrameCaptureOptions o) : options(o) {
         if (!o.handle || o.width < 2 || o.height < 2 || !o.fps || o.fps > 240)
             throw std::runtime_error("Invalid native capture dimensions or source");
-        if (!GraphicsCaptureSession::IsSupported()) throw std::runtime_error("Windows Graphics Capture is unavailable");
+        // OS capability is stable for this process; avoid a broker query for
+        // every new source or thumbnail. Permissions are checked on capture.
+        static const bool supported = GraphicsCaptureSession::IsSupported();
+        if (!supported) throw std::runtime_error("Windows Graphics Capture is unavailable");
         checked(av_hwdevice_ctx_create(&deviceRef.value, AV_HWDEVICE_TYPE_D3D11VA, nullptr, nullptr, 0), "Create D3D11 capture device");
         hardware = reinterpret_cast<AVD3D11VADeviceContext*>(reinterpret_cast<AVHWDeviceContext*>(deviceRef.value->data)->hwctx);
         device = hardware->device;
@@ -147,6 +169,16 @@ public:
         try { if (pool) pool.Close(); } catch (...) {}
     }
     AVBufferRef* frames() { return av_buffer_ref(framesRef.value); }
+    void enableCompositor() {
+        DeviceLock lock(hardware);
+        compositor = std::make_unique<GpuCompositor>(device.Get(), context.Get());
+    }
+    void overlays(const FrameGpuImage* images, size_t imageCount, const FrameGpuVertex* vertices,
+                  size_t vertexCount, const FrameGpuDraw* commands, size_t commandCount) {
+        if(!compositor) throw std::runtime_error("GPU compositor is not enabled");
+        DeviceLock lock(hardware);
+        compositor->update(images,imageCount,vertices,vertexCount,commands,commandCount);
+    }
     void initializeShaders() {
         ComPtr<ID3DBlob> vs, ps, errors;
         winrt::check_hresult(D3DCompile(shader, sizeof(shader)-1, nullptr, nullptr, nullptr, "vertex", "vs_4_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &vs, &errors));
@@ -260,6 +292,7 @@ public:
         context->PSSetShaderResources(0, 1, sourceView.GetAddressOf()); context->PSSetSamplers(0, 1, sampler.GetAddressOf());
         context->PSSetConstantBuffers(0, 1, constants.GetAddressOf());
         context->Draw(3, 0);
+        if(compositor) compositor->render(options.width, options.height);
         ID3D11ShaderResourceView* noSource = nullptr;
         context->PSSetShaderResources(0, 1, &noSource); context->OMSetRenderTargets(0, nullptr, nullptr);
         context->Flush();
@@ -283,3 +316,13 @@ extern "C" void frame_capture_pan(void* pointer, uint32_t left, uint32_t top, ui
     options.left = left; options.top = top; options.right = right; options.bottom = bottom;
 }
 extern "C" void frame_capture_close(void* pointer) noexcept { delete static_cast<Capture*>(pointer); }
+extern "C" int frame_capture_gpu_enable(void* pointer, char* error, size_t length) noexcept {
+    try { static_cast<Capture*>(pointer)->enableCompositor(); return 0; }
+    catch(...) { report(error,length); return -1; }
+}
+extern "C" int frame_capture_gpu_update(void* pointer, const FrameGpuImage* images, size_t imageCount,
+    const FrameGpuVertex* vertices, size_t vertexCount, const FrameGpuDraw* commands, size_t commandCount,
+    char* error, size_t length) noexcept {
+    try { static_cast<Capture*>(pointer)->overlays(images,imageCount,vertices,vertexCount,commands,commandCount); return 0; }
+    catch(...) { report(error,length); return -1; }
+}

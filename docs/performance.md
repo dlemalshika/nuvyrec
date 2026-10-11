@@ -25,7 +25,8 @@ Low resource. Saved presets also retain the chosen performance mode.
 Windows.Graphics.Capture uses a D3D11 target canvas at the recording dimensions.
 Scaling happens on the GPU before any CPU readback. Software, GIF and Quick Sync
 still read pixels back and convert them on the CPU; NVENC/AMF use GPU conversion.
-Optional annotations and cursor effects require software encoding. Weak GPUs,
+Optional effects now use D3D11 composition when available, with CPU fallback.
+Hardware encoder selection is preserved. See [GPU composition](gpu-composition.md). Weak GPUs,
 driver restrictions and capture permissions can still prevent recording.
 
 Thumbnail preview is independent of recording, limited to 480 x 270 at one

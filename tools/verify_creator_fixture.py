@@ -8,10 +8,12 @@ from pathlib import Path
 import subprocess
 parser=argparse.ArgumentParser()
 parser.add_argument('--bundle',type=Path,required=True)
+parser.add_argument('--require-gpu',action='store_true',help='Require D3D11 composition in the recorded fixture')
 parser.add_argument('directory',type=Path)
 args=parser.parse_args()
 result=json.loads((args.directory/'result.json').read_text(encoding='utf-8'))
 assert result['ok'],result
+if args.require_gpu:assert result.get('compositor')=='d3d11',result
 assert [result['width'],result['height'],result['fps']]==[640,360,24],result
 width,height=result['width'],result['height']
 video=Path(result['output'])

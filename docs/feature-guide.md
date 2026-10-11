@@ -1,6 +1,10 @@
 # Windows feature build
 
-Run `artifacts/Frame-Windows-Webcam/Frame.exe`, keeping the bundle together.
+Run `artifacts/Frame-Windows-Multistream/Frame.exe`, keeping the bundle together.
+
+Open **Live** in the header to configure YouTube, Facebook and TikTok server/key
+destinations and start streaming with local recording. See [live setup](live-streaming.md)
+for account access, upload capacity, reconnect and shared-picture limitations.
 
 ## Recording
 
@@ -23,7 +27,7 @@ negotiated against the installed driver; a selected encoder can be unavailable.
 Settings → Webcam overlay & green screen → Find cameras. Choose a device and
 enable the overlay; choose its corner/size, mirror and green-background controls.
 The saved video includes the camera; the lightweight screen preview does not.
-See [webcam setup and limitations](webcam.md). This adds software-encoding work.
+See [webcam setup and limitations](webcam.md). Composition uses D3D11 when available; decoding still uses CPU work.
 
 ## Audio and effects
 
@@ -35,8 +39,8 @@ playback track plus two independent AAC source tracks.
 Enable Live annotations before starting. Draw/arrows/boxes/spotlight tools appear
 above the preview during recording, with colors, undo and clear. Coordinates map
 to the captured source. These effects and display/region cursor/click rings use
-software encoding. Native cursor effects are visible in the saved video, not in
-the lightweight thumbnail. Text and keystroke overlays are not implemented.
+GPU composition when available, with CPU fallback. Native cursor effects are visible in the saved video, not in
+the lightweight thumbnail. Unicode text/logo layers and an opt-in shortcut display are available in Creator Studio.
 
 ## Replay, automation and recovery
 

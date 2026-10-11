@@ -6,7 +6,7 @@ is still in progress; see [release status](docs/release-status.md) for exact gap
 
 ## Run the local Windows build
 
-Open the latest build at `artifacts/Frame-Windows-ExportPresets/Frame.exe`. Keep the entire folder together: Flutter
+Open the latest build at `artifacts/Frame-Windows-GpuOverlays/Frame.exe`. Keep the entire folder together: Flutter
 assets, recorder_core.dll and the matching FFmpeg runtime DLLs are required.
 Choose a display, window or display region, choose a new output file, then record.
 The main workspace shows a live thumbnail preview. Open **Settings** for video,
@@ -25,6 +25,10 @@ See [creator overlays](docs/creator-overlays.md) for Sinhala/Unicode titles, log
 saved layouts and the optional keyboard-shortcut display.
 See [local exports](docs/exports.md) for landscape, vertical, square and small-file
 MP4 presets, audio-track selection and trim/crop combinations.
+See [GPU composition](docs/gpu-composition.md) for accelerated overlays, encoder
+selection, memory bounds and the remaining CPU readback paths.
+See [live streaming](docs/live-streaming.md) for YouTube/Facebook/TikTok setup,
+shared encoding, upload requirements and account-specific limits.
 
 ## Current features
 
@@ -40,6 +44,8 @@ MP4 presets, audio-track selection and trim/crop combinations.
   an off toggle and automatic suspension while the app is minimized.
 - Native file dialogs, output reveal, status/timer and safe recording shutdown.
 - Atomic refusal to overwrite existing recordings.
+- Native RTMP/RTMPS fan-out to up to three platforms with shared H.264/AAC encoding,
+  isolated bounded queues, reconnect, masked in-memory keys and concurrent local recording.
 - Global hotkeys/tray controls, countdown, saved quality presets and scheduled start.
 - Device selection, live audio meters/gain/mute, optional mixed playback track,
   microphone noise suppression/gate and limiter.
@@ -48,14 +54,14 @@ MP4 presets, audio-track selection and trim/crop combinations.
 - Local share/compression presets, aspect-ratio padding, 30 fps caps and export
   audio selection; source files are preserved and video threading is bounded.
 - Webcam overlay with camera selection, four-corner placement, size, mirror
-  and adjustable green-background removal (software H.264). Live webcam preview
+  and adjustable green-background removal (GPU composition / CPU fallback). Live webcam preview
   updates at 5 fps, or 2 fps in Low resource; the main-screen On/Off button can
   hide/show the overlay in a recording started with webcam enabled.
 - Draw/arrow/box/spotlight annotations; display/region cursor highlight/click effects.
-  These effects use software encoding and are off by default.
+  These effects use GPU composition when available, with CPU fallback, and are off by default.
 - Up to four Unicode text/logo layers, preview placement, opacity/order controls,
   twenty saved creator layouts and an opt-in shortcut display. Assets are cached
-  before recording; these effects select software H.264 encoding.
+  before recording; these effects preserve the selected hardware encoder.
 - Non-blocking native WGC sampling: static windows keep recording and remain
   stoppable; scaling and region panning happen on the GPU before CPU readback.
 - Local recording library/import/playback, PNG screenshots, MP4 remux, trim/crop
@@ -79,7 +85,7 @@ See [build instructions](docs/build.md). On the prepared local workspace:
 ```
 
 Packaging defaults to `artifacts/Frame-Windows`. To recreate the feature build
-alongside an open app, use `./tools/package-windows.ps1 -BundleName Frame-Windows-ExportPresets`.
+alongside an open app, use `./tools/package-windows.ps1 -BundleName Frame-Windows-Multistream`.
 
 The original [architecture plan](docs/architecture.md) explains the target
 monorepo, media ownership and future platform integrations. The current code adds
@@ -89,7 +95,7 @@ has no capture backend; Android/iOS are not implemented.
 
 ## Remaining work
 
-Live text editing, multiple capture sources and scene transitions, streaming,
+Live text editing, multiple capture sources and scene transitions, SRT/platform integrations,
 automatic captions/smart zoom, HEVC/AV1/HDR, long-duration sync,
 full GPU Quick Sync interop, macOS/Android/iOS backends, full-rate GPU preview,
 fault-injection recovery testing, signed installers and sustained low-end/4K120

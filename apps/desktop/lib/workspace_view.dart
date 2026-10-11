@@ -22,6 +22,7 @@ class RecorderWorkspace extends StatelessWidget {
     this.performanceMode = 'manual',
     this.webcam = const {},
     this.onWebcamToggle,
+    this.onLive,
   });
   final RecorderController recorder;
   final Widget sourceControls;
@@ -33,6 +34,7 @@ class RecorderWorkspace extends StatelessWidget {
   final String performanceMode;
   final Map<String, dynamic> webcam;
   final VoidCallback? onWebcamToggle;
+  final VoidCallback? onLive;
 
   @override
   Widget build(BuildContext context) {
@@ -77,7 +79,8 @@ class RecorderWorkspace extends StatelessWidget {
                   style: TextStyle(color: colors.muted, fontSize: 12),
                 ),
               ),
-              if (['recording', 'paused'].contains(recorder.state)) ...[
+              if (['recording', 'paused'].contains(recorder.state) &&
+                  recorder.status['streaming_active'] != true) ...[
                 OutlinedButton.icon(
                   onPressed: () => recorder.action(
                     recorder.state == 'paused' ? 'resume' : 'pause',
@@ -179,6 +182,18 @@ class RecorderWorkspace extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 16),
+                  if (onLive != null)
+                    OutlinedButton.icon(
+                      onPressed: onLive,
+                      label: const Text('Live'),
+                      icon: Icon(
+                        Icons.sensors,
+                        color: recorder.status['streaming_active'] == true
+                            ? Colors.redAccent
+                            : null,
+                      ),
+                    ),
+                  const SizedBox(width: 8),
                   if (recorder.status['replay_enabled'] == true && active)
                     IconButton(
                       onPressed: recorder.saveReplay,
@@ -501,6 +516,13 @@ class _RecordingHealth extends StatelessWidget {
             'Recording health',
             style: TextStyle(fontWeight: FontWeight.w600),
           ),
+          if (status['compositor'] == 'd3d11' || status['compositor'] == 'cpu')
+            Text(
+              status['compositor'] == 'd3d11'
+                  ? 'Overlays: D3D11 GPU'
+                  : 'Overlays: CPU fallback',
+              style: TextStyle(fontSize: 11, color: colors.muted),
+            ),
           if (['recording', 'paused'].contains(recorder.state) &&
               status['webcam_ready'] is bool)
             Text(

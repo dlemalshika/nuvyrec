@@ -142,7 +142,26 @@ pub fn annotations(
 
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct StreamRequest {
+    pub platform: String,
+    pub server: String,
+    pub key: String,
+}
+impl StreamRequest {
+    fn destination(&self) -> recorder_engine::streaming::Destination {
+        recorder_engine::streaming::Destination {
+            platform: self.platform.clone(),
+            server: self.server.clone(),
+            key: self.key.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Request {
+    #[serde(default)]
+    pub streaming: Vec<StreamRequest>,
     pub output: String,
     pub container: String,
     pub source_id: u64,
@@ -209,6 +228,7 @@ pub struct Request {
 }
 
 pub struct Worker {
+    pub streaming_stop: Arc<AtomicBool>,
     pub stop: Arc<AtomicBool>,
     pub pause: Arc<AtomicBool>,
     pub status: Arc<Mutex<serde_json::Value>>,
@@ -223,6 +243,31 @@ pub struct Worker {
 
 impl Worker {
     pub fn start(request: Request) -> Result<Self, String> {
+        if request.streaming.len() > 3 {
+            return Err("Choose at most three streaming destinations".into());
+        }
+        for (index, target) in request.streaming.iter().enumerate() {
+            target.destination().validate().map_err(|e| e.to_string())?;
+            if request.streaming[..index]
+                .iter()
+                .any(|t| t.platform == target.platform)
+            {
+                return Err("Duplicate streaming destination".into());
+            }
+        }
+        if !request.streaming.is_empty() {
+            if !["mkv", "mp4"].contains(&request.container.as_str())
+                || request.segment_seconds != 0
+                || request.adaptive_quality
+            {
+                return Err("Live streaming requires one continuous MKV/MP4 recording; disable recovery parts and adaptive resolution".into());
+            }
+            if request.system_audio && request.microphone && !request.mix_audio {
+                return Err(
+                    "Enable combined audio for streaming system sound and microphone".into(),
+                );
+            }
+        }
         if !cfg!(windows) {
             return Err("Native desktop capture is currently available on Windows only".into());
         }
@@ -291,10 +336,9 @@ impl Worker {
             || request.cursor_highlight
             || request.click_effects
             || request.webcam.enabled)
-            && (request.container == "gif"
-                || !["auto", "libx264"].contains(&request.encoder.as_str()))
+            && request.container == "gif"
         {
-            return Err("Overlays require auto/software H.264 encoding".into());
+            return Err("Overlays require H.264 recording, not GIF".into());
         }
         if request.replay_seconds > 0
             && (request.container == "gif"
@@ -328,7 +372,8 @@ impl Worker {
         let stop = Arc::new(AtomicBool::new(false));
         let pause = Arc::new(AtomicBool::new(false));
         let status = Arc::new(Mutex::new(
-            json!({"state":"preparing","output":request.output,"frames":0,"seconds":0}),
+            json!({"state":"preparing","output":request.output,"frames":0,"seconds":0,
+                "streaming_active": !request.streaming.is_empty()}),
         ));
         let worker_stop = stop.clone();
         let worker_pause = pause.clone();
@@ -344,6 +389,8 @@ impl Worker {
         let webcam_available = request.webcam.enabled;
         let webcam_visible = Arc::new(AtomicBool::new(webcam_available));
         let worker_webcam_visible = webcam_visible.clone();
+        let streaming_stop = Arc::new(AtomicBool::new(false));
+        let worker_streaming_stop = streaming_stop.clone();
         let thread = thread::Builder::new()
             .name("recorder-media".into())
             .spawn(move || {
@@ -360,6 +407,7 @@ impl Worker {
                         &worker_annotations,
                         &worker_quality,
                         &worker_webcam_visible,
+                        &worker_streaming_stop,
                     )
                 }));
                 let error = match result {
@@ -368,11 +416,20 @@ impl Worker {
                     Err(_) => Some("Native recording worker panicked".into()),
                 };
                 if let Some(error) = error {
+                    if let Ok(mut value) = worker_status.lock() {
+                        value["streaming_active"] = json!(false);
+                        if let Some(items) = value["streaming"].as_array_mut() {
+                            for item in items {
+                                item["state"] = json!("stopped");
+                            }
+                        }
+                    }
                     update(&worker_status, "failed", Some(&error), None, None, None);
                 }
             })
             .map_err(|e| e.to_string())?;
         Ok(Self {
+            streaming_stop,
             stop,
             pause,
             status,
@@ -418,7 +475,7 @@ fn update(
 
 #[allow(clippy::too_many_arguments)]
 fn run(
-    request: Request,
+    mut request: Request,
     mut config: RecordingConfig,
     source: sources::Source,
     stop: &AtomicBool,
@@ -429,6 +486,7 @@ fn run(
     annotations: &Mutex<Vec<recorder_engine::overlay::Annotation>>,
     reduce_quality: &AtomicBool,
     webcam_visible: &AtomicBool,
+    streaming_stop: &AtomicBool,
 ) -> Result<(), String> {
     #[cfg(windows)]
     let _dpi = sources::PhysicalCoordinates::enter();
@@ -475,8 +533,12 @@ fn run(
     } else {
         None
     };
+    let silent_stream_audio =
+        !request.streaming.is_empty() && !request.system_audio && !request.microphone;
     #[cfg(windows)]
-    let audio_rates: Vec<(i32, &str)> = if mix_enabled {
+    let audio_rates: Vec<(i32, &str)> = if silent_stream_audio {
+        vec![(48000, "Silent playback")]
+    } else if mix_enabled {
         vec![
             (48000, "Combined audio"),
             (48000, "System audio"),
@@ -501,16 +563,14 @@ fn run(
         None => String::new(),
     };
     let cursor = u8::from(request.capture_cursor || request.follow_mouse);
-    let candidates: Vec<&str> = if request.container == "gif" {
-        vec!["gif"]
-    } else if request.annotations_enabled
+    let effects = request.annotations_enabled
         || request.layers_enabled
         || request.shortcut_overlay
         || request.cursor_highlight
         || request.click_effects
-        || request.webcam.enabled
-    {
-        vec!["libx264"]
+        || request.webcam.enabled;
+    let candidates: Vec<&str> = if request.container == "gif" {
+        vec!["gif"]
     } else if request.encoder == "auto" {
         vec!["h264_nvenc", "h264_amf", "h264_qsv", "libx264"]
     } else {
@@ -533,6 +593,25 @@ fn run(
         let graph = capture_graph(&config, name, &handle, &crop, cursor);
         let attempt: Result<_, String> = (|| {
             let mut capture = Capture::open(&graph).map_err(|e| e.to_string())?;
+            if effects {
+                if let Err(error) = capture.enable_gpu_overlays() {
+                    if name != "libx264" {
+                        return Err(error.to_string());
+                    }
+                    failures.push(format!("GPU compositor unavailable; CPU fallback: {error}"));
+                }
+                #[cfg(windows)]
+                if capture.gpu_overlays_enabled() {
+                    let layers = if request.layers_enabled {
+                        crate::layers::snapshot()?
+                    } else {
+                        Vec::new()
+                    };
+                    capture
+                        .update_gpu_overlays(&layers, &[], &[], None)
+                        .map_err(|e| e.to_string())?;
+                }
+            }
             let began = Instant::now();
             loop {
                 if stop.load(Ordering::Acquire) {
@@ -580,10 +659,12 @@ fn run(
     } else {
         None
     };
-    let repeat_overlays = camera.is_some()
-        || request.layers_enabled
-        || request.shortcut_overlay
-        || request.annotations_enabled;
+    let gpu_overlays = capture.gpu_overlays_enabled();
+    let repeat_overlays = !gpu_overlays
+        && (camera.is_some()
+            || request.layers_enabled
+            || request.shortcut_overlay
+            || request.annotations_enabled);
     let mut last_screen = if repeat_overlays {
         Some(first.try_clone().map_err(|e| e.to_string())?)
     } else {
@@ -594,7 +675,23 @@ fn run(
             .enable_replay(request.replay_seconds, request.replay_mib)
             .map_err(|e| e.to_string())?;
     }
+    let streaming_enabled =
+        !request.streaming.is_empty() && !streaming_stop.load(Ordering::Acquire);
+    if streaming_enabled {
+        session
+            .enable_streaming(
+                request
+                    .streaming
+                    .iter()
+                    .map(StreamRequest::destination)
+                    .collect(),
+            )
+            .map_err(|e| e.to_string())?;
+        request.streaming.clear(); // only network workers retain credentials
+    }
     if let Ok(mut value) = status.lock() {
+        value["streaming_active"] = json!(streaming_enabled);
+        value["streaming"] = stream_status(&session);
         value["fallback_reasons"] = json!(failures);
         value["annotations_enabled"] = json!(request.annotations_enabled);
         value["layers_enabled"] = json!(request.layers_enabled);
@@ -602,8 +699,15 @@ fn run(
         value["shortcut_right"] = json!(request.shortcut_right);
         value["webcam_available"] = json!(request.webcam.enabled);
         value["webcam_visible"] = json!(request.webcam.enabled);
+        value["compositor"] = json!(if gpu_overlays {
+            "d3d11"
+        } else if effects {
+            "cpu"
+        } else {
+            "none"
+        });
     }
-    if request.layers_enabled {
+    if request.layers_enabled && !gpu_overlays {
         first
             .raster_layers(&crate::layers::snapshot()?)
             .map_err(|e| e.to_string())?;
@@ -661,7 +765,14 @@ fn run(
     let mut last_pointer = Instant::now();
     let mut shortcuts = crate::shortcuts::Tracker::new();
     let mut last_shortcut_poll = Instant::now();
+    let mut last_gpu_update = Instant::now() - Duration::from_secs(1);
     while !stop.load(Ordering::Acquire) {
+        if streaming_stop.load(Ordering::Acquire) {
+            session.stop_streaming();
+            if let Ok(mut value) = status.lock() {
+                value["streaming_active"] = json!(false);
+            }
+        }
         let replay_path = replay_request
             .lock()
             .map_err(|_| "Replay control lock failed")?
@@ -694,6 +805,76 @@ fn run(
             }
             if let Ok(mut value) = status.lock() {
                 value["current_region"] = json!(region);
+            }
+        }
+        #[cfg(windows)]
+        let cursor =
+            if source.kind == "display" && (request.cursor_highlight || request.click_effects) {
+                let position = sources::cursor_position(source.id, current_region);
+                if request.click_effects {
+                    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+                        GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON,
+                    };
+                    let down = unsafe {
+                        GetAsyncKeyState(i32::from(VK_LBUTTON)) < 0
+                            || GetAsyncKeyState(i32::from(VK_RBUTTON)) < 0
+                    };
+                    if down && !mouse_down {
+                        click = position.map(|p| (p, Instant::now()));
+                    }
+                    mouse_down = down;
+                }
+                position
+            } else {
+                None
+            };
+        #[cfg(windows)]
+        let shortcut_layer = if request.shortcut_overlay {
+            if last_shortcut_poll.elapsed() >= Duration::from_millis(20) {
+                shortcuts.sample(
+                    crate::shortcuts::current(),
+                    request.shortcut_seconds,
+                    request.shortcut_right,
+                );
+                last_shortcut_poll = Instant::now();
+            }
+            shortcuts.layer()
+        } else {
+            None
+        };
+        #[cfg(windows)]
+        let mut gpu_cursor = Vec::new();
+        #[cfg(windows)]
+        if gpu_overlays {
+            if request.cursor_highlight {
+                if let Some(position) = cursor {
+                    gpu_cursor.push(cursor_ring(position, 18.0, &config, [255, 220, 40]));
+                }
+            }
+            if let Some((position, began)) = click {
+                let age = began.elapsed().as_secs_f32();
+                if age < 0.4 {
+                    gpu_cursor.push(cursor_ring(
+                        position,
+                        10.0 + age * 80.0,
+                        &config,
+                        [255, 90, 70],
+                    ));
+                } else {
+                    click = None;
+                }
+            }
+            if last_gpu_update.elapsed() >= Duration::from_secs_f64(1.0 / f64::from(config.fps)) {
+                refresh_gpu_overlays(
+                    &mut capture,
+                    &request,
+                    camera.as_ref(),
+                    webcam_visible,
+                    annotations,
+                    shortcut_layer.as_ref(),
+                    &gpu_cursor,
+                )?;
+                last_gpu_update = Instant::now();
             }
         }
         let mut frame = capture.next_frame().map_err(|e| e.to_string())?;
@@ -761,9 +942,27 @@ fn run(
                     config = next.clone();
                     // Free the old capture pool before opening a smaller one.
                     drop(capture);
-                    capture =
-                        Capture::open(&capture_graph(&config, &encoder, &handle, &crop, cursor))
-                            .map_err(|e| e.to_string())?;
+                    capture = Capture::open(&capture_graph(
+                        &config,
+                        &encoder,
+                        &handle,
+                        &crop,
+                        u8::from(request.capture_cursor || request.follow_mouse),
+                    ))
+                    .map_err(|e| e.to_string())?;
+                    #[cfg(windows)]
+                    if gpu_overlays {
+                        capture.enable_gpu_overlays().map_err(|e| e.to_string())?;
+                        refresh_gpu_overlays(
+                            &mut capture,
+                            &request,
+                            camera.as_ref(),
+                            webcam_visible,
+                            annotations,
+                            shortcut_layer.as_ref(),
+                            &gpu_cursor,
+                        )?;
+                    }
                     let began = Instant::now();
                     if request.follow_mouse {
                         capture
@@ -831,27 +1030,6 @@ fn run(
             last_load = Instant::now();
         }
         #[cfg(windows)]
-        let cursor =
-            if source.kind == "display" && (request.cursor_highlight || request.click_effects) {
-                let position = sources::cursor_position(source.id, current_region);
-                if request.click_effects {
-                    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-                        GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON,
-                    };
-                    let down = unsafe {
-                        GetAsyncKeyState(i32::from(VK_LBUTTON)) < 0
-                            || GetAsyncKeyState(i32::from(VK_RBUTTON)) < 0
-                    };
-                    if down && !mouse_down {
-                        click = position.map(|p| (p, Instant::now()));
-                    }
-                    mouse_down = down;
-                }
-                position
-            } else {
-                None
-            };
-        #[cfg(windows)]
         for (index, raw_samples) in audio_packets.iter().enumerate() {
             let mut samples = processors[index]
                 .process(raw_samples)
@@ -907,21 +1085,12 @@ fn run(
         if let Some(bus) = &mut mixer {
             drain_mix(&mut session, bus, elapsed.as_secs_f64(), segment_start)?;
         }
+        if silent_stream_audio {
+            session
+                .write_audio(0, &[], elapsed.as_secs_f64())
+                .map_err(|e| e.to_string())?;
+        }
         let pts = (elapsed.as_secs_f64() * f64::from(config.fps)).floor() as i64;
-        #[cfg(windows)]
-        let shortcut_layer = if request.shortcut_overlay {
-            if last_shortcut_poll.elapsed() >= Duration::from_millis(20) {
-                shortcuts.sample(
-                    crate::shortcuts::current(),
-                    request.shortcut_seconds,
-                    request.shortcut_right,
-                );
-                last_shortcut_poll = Instant::now();
-            }
-            shortcuts.layer()
-        } else {
-            None
-        };
         if repeat_overlays {
             if let Some(base) = &frame {
                 last_screen = Some(base.try_clone().map_err(|e| e.to_string())?);
@@ -938,58 +1107,65 @@ fn run(
             if pts > last_pts {
                 skipped += (pts - last_pts - 1) as u64;
                 let encoding_started = Instant::now();
-                if let Some(camera) = camera
-                    .as_ref()
-                    .filter(|_| webcam_visible.load(Ordering::Acquire))
-                {
-                    if let Ok(image) = camera.latest.lock() {
-                        if let Some(image) = image
-                            .as_ref()
-                            .filter(|v| v.captured.elapsed() < Duration::from_secs(2))
-                        {
-                            frame
-                                .webcam(image, &request.webcam.placement())
-                                .map_err(|e| e.to_string())?;
+                if !gpu_overlays {
+                    if let Some(camera) = camera
+                        .as_ref()
+                        .filter(|_| webcam_visible.load(Ordering::Acquire))
+                    {
+                        if let Ok(image) = camera.latest.lock() {
+                            if let Some(image) = image
+                                .as_ref()
+                                .filter(|v| v.captured.elapsed() < Duration::from_secs(2))
+                            {
+                                frame
+                                    .webcam(image, &request.webcam.placement())
+                                    .map_err(|e| e.to_string())?;
+                            }
                         }
                     }
-                }
-                if request.annotations_enabled {
-                    let marks = annotations.lock().map_err(|_| "Annotation lock failed")?;
-                    frame.annotate(&marks).map_err(|e| e.to_string())?;
-                }
-                if request.layers_enabled {
-                    frame
-                        .raster_layers(&crate::layers::snapshot()?)
-                        .map_err(|e| e.to_string())?;
-                }
-                #[cfg(windows)]
-                if let Some(layer) = &shortcut_layer {
-                    frame
-                        .raster_layers(std::slice::from_ref(layer))
-                        .map_err(|e| e.to_string())?;
-                }
-                #[cfg(windows)]
-                {
-                    if request.cursor_highlight {
-                        if let Some(position) = cursor {
-                            frame
-                                .annotate(&[cursor_ring(position, 18.0, &config, [255, 220, 40])])
-                                .map_err(|e| e.to_string())?;
-                        }
+                    if request.annotations_enabled {
+                        let marks = annotations.lock().map_err(|_| "Annotation lock failed")?;
+                        frame.annotate(&marks).map_err(|e| e.to_string())?;
                     }
-                    if let Some((position, began)) = click {
-                        let age = began.elapsed().as_secs_f32();
-                        if age < 0.4 {
-                            frame
-                                .annotate(&[cursor_ring(
-                                    position,
-                                    10.0 + age * 80.0,
-                                    &config,
-                                    [255, 90, 70],
-                                )])
-                                .map_err(|e| e.to_string())?;
-                        } else {
-                            click = None;
+                    if request.layers_enabled {
+                        frame
+                            .raster_layers(&crate::layers::snapshot()?)
+                            .map_err(|e| e.to_string())?;
+                    }
+                    #[cfg(windows)]
+                    if let Some(layer) = &shortcut_layer {
+                        frame
+                            .raster_layers(std::slice::from_ref(layer))
+                            .map_err(|e| e.to_string())?;
+                    }
+                    #[cfg(windows)]
+                    {
+                        if request.cursor_highlight {
+                            if let Some(position) = cursor {
+                                frame
+                                    .annotate(&[cursor_ring(
+                                        position,
+                                        18.0,
+                                        &config,
+                                        [255, 220, 40],
+                                    )])
+                                    .map_err(|e| e.to_string())?;
+                            }
+                        }
+                        if let Some((position, began)) = click {
+                            let age = began.elapsed().as_secs_f32();
+                            if age < 0.4 {
+                                frame
+                                    .annotate(&[cursor_ring(
+                                        position,
+                                        10.0 + age * 80.0,
+                                        &config,
+                                        [255, 90, 70],
+                                    )])
+                                    .map_err(|e| e.to_string())?;
+                            } else {
+                                click = None;
+                            }
                         }
                     }
                 }
@@ -1025,6 +1201,7 @@ fn run(
             let bytes = finalized_bytes + current_path.metadata().map(|m| m.len()).unwrap_or(0);
             if let Ok(mut value) = status.lock() {
                 value["file_bytes"] = json!(bytes);
+                value["streaming"] = stream_status(&session);
                 value["skipped_frame_slots"] = json!(skipped);
                 value["encode_ms"] = json!(encode_ms);
                 let (seconds, bytes) = session.replay_status();
@@ -1094,8 +1271,21 @@ fn run(
         let clock = final_clock + 0.05;
         drain_mix(&mut session, bus, clock, segment_start)?;
     }
+    let mut streams = stream_status(&session);
+    if silent_stream_audio {
+        session
+            .write_audio(0, &[], final_clock)
+            .map_err(|e| e.to_string())?;
+    }
     session.finish().map_err(|e| e.to_string())?;
     if let Ok(mut value) = status.lock() {
+        if let Some(items) = streams.as_array_mut() {
+            for item in items {
+                item["state"] = json!("stopped");
+            }
+        }
+        value["streaming"] = streams;
+        value["streaming_active"] = json!(false);
         value["segment_durations"][current_path.to_string_lossy().as_ref()] =
             json!((final_clock - segment_start).max(0.0));
     }
@@ -1110,6 +1300,18 @@ fn run(
     Ok(())
 }
 
+fn stream_status(session: &RecordingSession) -> serde_json::Value {
+    json!(session
+        .streaming_status()
+        .iter()
+        .map(|s| json!({
+            "platform": s.platform, "state": s.state, "packets": s.packets,
+            "bytes": s.bytes, "reconnects": s.reconnects, "dropped_packets": s.dropped_packets,
+        "error": s.error, "error_code": s.error_code, "error_operation": s.error_operation,
+        }))
+        .collect::<Vec<_>>())
+}
+
 /// Quantize the segment origin once. Rounding a fractional elapsed delta on
 /// every frame can produce duplicate PTS even when absolute ticks increase.
 fn segment_video_pts(absolute: i64, origin: f64, fps: u32) -> i64 {
@@ -1118,6 +1320,44 @@ fn segment_video_pts(absolute: i64, origin: f64, fps: u32) -> i64 {
 
 fn active_duration(elapsed: Duration, paused: Duration, current_pause: Duration) -> Duration {
     elapsed.saturating_sub(paused.saturating_add(current_pause))
+}
+
+/// Camera bytes are borrowed under a short latest-frame lock only for a small
+/// texture upload. No camera read/decode or full-screen CPU blending runs here.
+#[cfg(windows)]
+fn refresh_gpu_overlays(
+    capture: &mut Capture,
+    request: &Request,
+    camera: Option<&recorder_engine::webcam::Camera>,
+    visible: &AtomicBool,
+    marks: &Mutex<Vec<recorder_engine::overlay::Annotation>>,
+    shortcut: Option<&recorder_engine::layers::Layer>,
+    cursor: &[recorder_engine::overlay::Annotation],
+) -> Result<(), String> {
+    let mut layers = if request.layers_enabled {
+        crate::layers::snapshot()?
+    } else {
+        Vec::new()
+    };
+    if let Some(layer) = shortcut {
+        layers.push(layer.clone());
+    }
+    let annotations = marks.lock().map_err(|_| "Annotation lock failed")?;
+    let annotations = if request.annotations_enabled {
+        annotations.as_slice()
+    } else {
+        &[]
+    };
+    let camera = camera.filter(|_| visible.load(Ordering::Acquire));
+    let image = camera.and_then(|c| c.latest.lock().ok());
+    let place = request.webcam.placement();
+    let image = image
+        .as_ref()
+        .and_then(|i| i.as_ref())
+        .filter(|i| i.captured.elapsed() < Duration::from_secs(2));
+    capture
+        .update_gpu_overlays(&layers, annotations, cursor, image.map(|i| (i, &place)))
+        .map_err(|e| e.to_string())
 }
 
 fn capture_graph(

@@ -16,10 +16,12 @@ Priorities are recommendations for Frame's lightweight recorder focus.
 | Replay history | Implemented; bounded encoded-packet history, MKV save, keyframe/timestamp tests |
 | Recovery segmentation | Implemented for MKV; finalized parts retained; current part not guaranteed |
 | Drawing/arrows/boxes/spotlight | Implemented in preview and recorded CPU compositor; Unicode titles prepared before recording |
-| Cursor highlight/click rings, shortcut display | Implemented; shortcuts opt-in, ordinary typing excluded, software H.264 |
+| Cursor highlight/click rings, shortcut display | Implemented; shortcuts opt-in, ordinary typing excluded, GPU composition / CPU fallback |
+| GPU overlays/compositing | Implemented on Windows D3D11; hardware encoder choice preserved; generated-pixel GPU validation passed |
 | Webcam/chroma key | Implemented; bounded camera worker, actual capture verified |
 | Text/logo layers and saved creator layouts | Implemented; four cached layers, twenty layouts; live text editing and multi-source transitions pending |
-| Streaming/reconnect, automatic captions/smart zoom | Pending |
+| RTMP/RTMPS multistream and reconnect | Implemented Windows alpha; real platform validation pending |
+| SRT, platform account integrations, automatic captions/smart zoom | Pending |
 | Adaptive quality | Implemented for segmented MKV; measured overload reduces quality without increasing resources |
 | HEVC/AV1/HDR | Pending |
 | macOS, Android, iOS | Native capture integration pending |
@@ -71,8 +73,9 @@ cursor effects, noise removal and transcription/captions.
   packets with a strict memory budget. Avoid raw-frame buffering on low-RAM PCs.
 - **Scenes and source layers:** saved layouts, text/logo overlays, transitions
   and multiple displays/cameras. OBS documents these scene workflows.
-- **Streaming:** RTMP/SRT outputs with reconnect and network telemetry. Keep
-  recording quality separate from network bitrate.
+- **Streaming:** RTMP/RTMPS multistream now shares encoding with local recording.
+  SRT, separate recording quality and platform account integrations remain pending.
+  See [live streaming](live-streaming.md).
 - **Modern codecs / HDR:** capability-tested HEVC/AV1, HDR metadata and proper
   SDR tone mapping. Account for target-player compatibility and build licensing.
 - **Automatic captions and smart zoom:** optional post-processing; heavier models

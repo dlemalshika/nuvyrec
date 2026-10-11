@@ -14,6 +14,7 @@ pub(crate) struct Output {
     io: *mut av::AVIOContext,
     file: Option<Box<File>>,
     pub(crate) replay: Option<crate::replay::Replay>,
+    pub(crate) streaming: Option<crate::streaming::Streaming>,
 }
 
 impl Output {
@@ -23,6 +24,7 @@ impl Output {
             io: ptr::null_mut(),
             file: None,
             replay: None,
+            streaming: None,
         };
         // SAFETY: output pointer and muxer name are valid for this call; no
         // filename is needed because the muxer is chosen explicitly.
@@ -89,6 +91,9 @@ impl Output {
     }
     pub(crate) unsafe fn mux(&mut self, packet: *mut av::AVPacket) -> Result<()> {
         unsafe {
+            if let Some(streaming) = &self.streaming {
+                streaming.submit(packet);
+            }
             if let Some(replay) = &mut self.replay {
                 replay.record(self.raw, packet)?;
             }

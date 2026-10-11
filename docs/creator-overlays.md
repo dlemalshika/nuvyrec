@@ -27,19 +27,20 @@ polls can be missed. Pausing suspends the recording loop.
 
 ## Resource policy and limits
 
-All effects are off by default. Text/logo and shortcut effects currently use
-software H.264; they are unavailable for GIF. Automatic/Low resource policies
+All effects are off by default. Text/logo and shortcut effects use D3D11 GPU
+composition when available, with a software H.264 CPU fallback; GIF is excluded. Automatic/Low resource policies
 still cap the canvas and encoder work. Fonts and logos are rendered on edits,
-not on recording frames. At most four assets occupy a 4 MiB native cache;
+not on recording frames. At most four assets occupy an 8 MiB native cache (RGBA plus CPU fallback colors);
 upload buffers are capped at 2 MiB each. Flutter assets are downscaled to
 768 × 256; source files are limited to 8 MiB and decoded dimensions to 8192 per
 side / 32 million pixels. Transparent RGBA pixels retain the recorded background.
 Moving a cached layer does not reload its pixels.
 
 GPU capture keeps one source-size texture plus a two-frame WGC pool and scaled
-output frames. Software overlays require CPU readback of the scaled canvas;
-they are not a zero-copy compositor. Enabling more layers consumes additional
-CPU and is not a guarantee of full-rate recording on every low-end PC.
+output frames. GPU effects compose before encoder conversion; NVENC/AMF can keep
+the screen surface on the GPU. Quick Sync/software still read back the composed
+canvas. Small raster/camera textures are uploaded from RAM. See
+[GPU composition](gpu-composition.md) for bounds and verification.
 Saved layouts are a single screen/window/region plus optional webcam and raster
 layers; multiple simultaneous screens/cameras and scene transitions remain work.
 

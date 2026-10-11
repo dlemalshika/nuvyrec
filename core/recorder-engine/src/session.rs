@@ -27,6 +27,33 @@ pub struct RecordingSession {
 }
 
 impl RecordingSession {
+    /// Start independent, bounded RTMP outputs using this session's encoded
+    /// H.264 and first AAC track. Call before submitting the first video frame.
+    /// Network failures never propagate into the local recording muxer.
+    pub fn enable_streaming(&mut self, targets: Vec<crate::streaming::Destination>) -> Result<()> {
+        if self.state != State::Ready || self.output.streaming.is_some() || self.last_pts.is_some()
+        {
+            return Err(Error::State("start streaming before the first frame"));
+        }
+        self.output.streaming =
+            Some(unsafe { crate::streaming::Streaming::new(self.output.raw, targets)? });
+        Ok(())
+    }
+
+    pub fn streaming_status(&self) -> Vec<crate::streaming::DestinationStatus> {
+        self.output
+            .streaming
+            .as_ref()
+            .map_or_else(Vec::new, |s| s.status())
+    }
+
+    /// Stop publishing while keeping the local recording session alive.
+    pub fn stop_streaming(&mut self) {
+        if let Some(streaming) = &mut self.output.streaming {
+            streaming.request_stop();
+        }
+    }
+
     pub fn enable_replay(&mut self, seconds: u32, limit_mib: u32) -> Result<()> {
         self.output.replay = Some(crate::replay::Replay::new(
             seconds,

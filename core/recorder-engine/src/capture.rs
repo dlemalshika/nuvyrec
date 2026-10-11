@@ -11,6 +11,15 @@ pub struct Capture {
     native: *mut std::ffi::c_void,
     #[cfg(windows)]
     source: *mut av::AVFilterContext,
+    gpu_enabled: bool,
+    #[cfg(windows)]
+    gpu_size: [u32; 2],
+    #[cfg(windows)]
+    gpu_rasters: Vec<std::sync::Arc<crate::layers::Raster>>,
+    #[cfg(windows)]
+    camera_stamp: Option<std::time::Instant>,
+    #[cfg(windows)]
+    camera_identity: u64,
     _thread: PhantomData<Rc<()>>,
 }
 
@@ -30,6 +39,15 @@ impl Capture {
             native: ptr::null_mut(),
             #[cfg(windows)]
             source: ptr::null_mut(),
+            gpu_enabled: false,
+            #[cfg(windows)]
+            gpu_size: [options.width as u32, options.height as u32],
+            #[cfg(windows)]
+            gpu_rasters: Vec::new(),
+            #[cfg(windows)]
+            camera_stamp: None,
+            #[cfg(windows)]
+            camera_identity: 0,
             _thread: PhantomData,
         };
         if result.graph.is_null() {
@@ -155,6 +173,78 @@ impl Capture {
             }
         }
         Ok(result)
+    }
+
+    /// Capability is checked before an encoder/output is opened. A caller may
+    /// fall back to the CPU compositor only with a YUV420P software pipeline.
+    pub fn enable_gpu_overlays(&mut self) -> Result<()> {
+        #[cfg(windows)]
+        {
+            let mut error = [0 as libc::c_char; 512];
+            if unsafe {
+                native::frame_capture_gpu_enable(self.native, error.as_mut_ptr(), error.len())
+            } < 0
+            {
+                return Err(native::error(&error));
+            }
+            self.gpu_enabled = true;
+            Ok(())
+        }
+        #[cfg(not(windows))]
+        {
+            Err(Error::State("D3D11 compositing requires Windows"))
+        }
+    }
+    pub fn gpu_overlays_enabled(&self) -> bool {
+        self.gpu_enabled
+    }
+
+    /// Synchronous upload on the capture owner thread. Native textures retain
+    /// pixels after return; Rust retains raster identities to prevent ABA reuse.
+    #[cfg(windows)]
+    pub fn update_gpu_overlays(
+        &mut self,
+        layers: &[crate::layers::Layer],
+        marks: &[crate::overlay::Annotation],
+        cursor: &[crate::overlay::Annotation],
+        camera: Option<(&crate::webcam::Image, &crate::webcam::Placement)>,
+    ) -> Result<()> {
+        if !self.gpu_enabled {
+            return Err(Error::State("GPU compositor disabled"));
+        }
+        if let Some((image, _)) = camera {
+            if self.camera_stamp != Some(image.captured) {
+                self.camera_identity = self.camera_identity.wrapping_add(1).max(1);
+                self.camera_stamp = Some(image.captured);
+            }
+        }
+        let packet = crate::gpu_overlay::Packet::new(
+            self.gpu_size,
+            layers,
+            marks,
+            cursor,
+            camera,
+            self.camera_identity,
+        )?;
+        let mut error = [0 as libc::c_char; 512];
+        if unsafe {
+            native::frame_capture_gpu_update(
+                self.native,
+                packet.textures.as_ptr(),
+                packet.textures.len(),
+                packet.vertices.as_ptr(),
+                packet.vertices.len(),
+                packet.draws.as_ptr(),
+                packet.draws.len(),
+                error.as_mut_ptr(),
+                error.len(),
+            )
+        } < 0
+        {
+            return Err(native::error(&error));
+        }
+        self.gpu_rasters = packet.retained;
+        Ok(())
     }
 
     /// Update the native GPU shader crop on the owning media thread. Output
@@ -287,6 +377,22 @@ mod native {
             bottom: u32,
         );
         pub fn frame_capture_close(pointer: *mut std::ffi::c_void);
+        pub fn frame_capture_gpu_enable(
+            pointer: *mut std::ffi::c_void,
+            error: *mut libc::c_char,
+            length: usize,
+        ) -> i32;
+        pub fn frame_capture_gpu_update(
+            pointer: *mut std::ffi::c_void,
+            images: *const crate::gpu_overlay::Texture,
+            image_count: usize,
+            vertices: *const crate::gpu_overlay::Vertex,
+            vertex_count: usize,
+            commands: *const crate::gpu_overlay::Draw,
+            command_count: usize,
+            error: *mut libc::c_char,
+            length: usize,
+        ) -> i32;
     }
     pub fn error(buffer: &[libc::c_char]) -> Error {
         Error::Native(

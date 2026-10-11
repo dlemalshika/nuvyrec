@@ -1,5 +1,6 @@
 fn main() {
     println!("cargo:rerun-if-changed=native/wgc_capture.cpp");
+    println!("cargo:rerun-if-changed=native/gpu_compositor.h");
     println!("cargo:rerun-if-env-changed=FFMPEG_DIR");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;

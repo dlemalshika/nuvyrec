@@ -44,7 +44,7 @@ pub fn upload(meta: Upload, rgba: &[u8]) -> Result<(), String> {
         .sum::<usize>()
         + layer.raster.bytes();
     if bytes > MAX_BANK_BYTES {
-        return Err("Overlay cache exceeds 4 MiB".into());
+        return Err("Overlay cache exceeds 8 MiB (RGBA and fallback colors)".into());
     }
     value[meta.id] = Some(layer);
     Ok(())

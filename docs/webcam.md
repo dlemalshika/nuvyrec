@@ -37,8 +37,9 @@ continues in the native engine. Screenshots capture the source, not the overlay.
 
 ## Resources and ownership
 
-Webcam composition currently requires the software H.264 path. Optional overlays
-add CPU cost, including on a system capable of hardware encoding. Camera reading
+Webcam scaling, blending and green key use the D3D11 GPU compositor when available.
+Hardware encoder selection is preserved; CPU composition remains an initialization
+fallback with software H.264. See [GPU composition](gpu-composition.md). Camera reading
 and decoding run on a dedicated thread, with a single decoder thread and an
 8 MiB DirectShow packet-buffer request. Some driver allocations are outside this
 budget. Output BGRA images are limited to 640 x 480; Low resource uses a maximum

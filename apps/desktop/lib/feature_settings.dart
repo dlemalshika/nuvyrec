@@ -36,7 +36,7 @@ class FeatureSettings extends StatelessWidget {
           childrenPadding: const EdgeInsets.all(16),
           children: [
             const Text(
-              'Live webcam appears in the main preview and saved video. Uses software H.264 encoding. Camera frames are limited to 15 updates/second; preview uses 5 fps, or 2 fps in Low resource. Enable before recording, then show/hide it from the main screen.',
+              'Live webcam appears in the main preview and saved video. Uses GPU composition when available, with CPU fallback. Camera frames are limited to 15 updates/second; preview uses 5 fps, or 2 fps in Low resource. Enable before recording, then show/hide it from the main screen.',
             ),
             TextButton.icon(
               onPressed: active || recorder.camerasLoading
@@ -278,7 +278,7 @@ class FeatureSettings extends StatelessWidget {
               contentPadding: EdgeInsets.zero,
               title: const Text('Live annotations'),
               subtitle: const Text(
-                'Draw, arrows, boxes and spotlight on the preview. Uses software encoding; higher CPU cost.',
+                'Draw, arrows, boxes and spotlight on the preview. Uses GPU composition when available; CPU fallback adds load.',
               ),
               value: options.annotations,
               onChanged: active

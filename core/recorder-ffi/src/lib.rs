@@ -224,7 +224,7 @@ pub unsafe extern "C" fn recorder_command_json(text: *const c_char) -> *mut c_ch
                 }
                 let request = match serde_json::from_value(command["config"].clone()) {
                     Ok(r) => r,
-                    Err(e) => return json!({"ok":false,"error":e.to_string()}),
+                    Err(_) => return json!({"ok":false,"error":"Invalid recording configuration"}),
                 };
                 match worker::Worker::start(request) {
                     Ok(w) => {
@@ -312,12 +312,28 @@ pub unsafe extern "C" fn recorder_command_json(text: *const c_char) -> *mut c_ch
                     Err(_) => json!({"ok":false,"error":"Audio controls unavailable"}),
                 }
             }
+            "stop_streaming" => {
+                let Some(worker) = locked.as_ref().filter(|w| !w.finished()) else {
+                    return json!({"ok":false,"error":"No active recording"});
+                };
+                worker.streaming_stop.store(true, Ordering::Release);
+                json!({"ok":true})
+            }
             "pause" | "resume" | "stop" => {
                 let Some(worker) = locked.as_ref() else {
                     return json!({"ok":false,"error":"No recording session"});
                 };
                 if worker.finished() {
                     return json!({"ok":false,"error":"Recording has already ended"});
+                }
+                if command["action"] == "pause"
+                    && worker
+                        .status
+                        .lock()
+                        .map(|s| s["streaming_active"] == true)
+                        .unwrap_or(true)
+                {
+                    return json!({"ok":false,"error":"Stop live streaming before pausing the local recording"});
                 }
                 match command["action"].as_str() {
                     Some("pause") => worker.pause.store(true, Ordering::Release),

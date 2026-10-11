@@ -10,6 +10,7 @@ import 'media_jobs.dart';
 import 'recording_library.dart';
 import 'creator_studio.dart';
 import 'creator_layers.dart';
+import 'live_streaming.dart';
 
 class RecorderApp extends StatefulWidget {
   const RecorderApp({super.key, this.controller});
@@ -28,6 +29,11 @@ class _RecorderAppState extends State<RecorderApp> {
   int _themeRevision = 0;
   final features = FeatureOptions();
   final mediaJobs = MediaJobs();
+  final liveDestinations = [
+    LiveDestination('youtube', 'YouTube'),
+    LiveDestination('facebook', 'Facebook'),
+    LiveDestination('tiktok', 'TikTok'),
+  ];
   List<Map<String, dynamic>> savedPresets = [];
   List<Map<String, dynamic>> creatorLayouts = [];
   Timer? _preferenceTimer;
@@ -342,7 +348,27 @@ class _RecorderAppState extends State<RecorderApp> {
     }
   }
 
-  Map<String, dynamic>? _recordingConfig() {
+  void _showLive(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (_) => LiveStreamingSetup(
+        destinations: liveDestinations,
+        recorder: recorder,
+        onStart: () {
+          if (!['mkv', 'mp4'].contains(format)) {
+            recorder.showError(
+              'Choose MKV or MP4 in Settings before starting live.',
+            );
+            return;
+          }
+          final config = _recordingConfig(live: true);
+          if (config != null) recorder.begin(config, features.countdown);
+        },
+      ),
+    );
+  }
+
+  Map<String, dynamic>? _recordingConfig({bool live = false}) {
     final source = selected;
     if (source == null ||
         source['minimized'] == true ||
@@ -374,7 +400,11 @@ class _RecorderAppState extends State<RecorderApp> {
       recorder.showError('The capture area is too small.');
       return null;
     }
-    final ratio = math.min(1.0, maxHeight / height);
+    var ratio = math.min(
+      1.0,
+      (live ? math.min(720, maxHeight) : maxHeight) / height,
+    );
+    if (live) ratio = math.min(ratio, 1280 / width);
     final outWidth = math.max(2, (width * ratio / 2).floor() * 2);
     final outHeight = math.max(2, (height * ratio / 2).floor() * 2);
     final extras = features.toJson()..remove('countdown');
@@ -390,8 +420,14 @@ class _RecorderAppState extends State<RecorderApp> {
           features.captureCursor || (mode == 'region' && features.followMouse),
       'replay_seconds': format == 'gif' ? 0 : features.replaySeconds,
       'annotations_enabled': format != 'gif' && features.annotations,
-      'segment_seconds': format == 'mkv' ? features.segmentSeconds : 0,
-      'adaptive_quality': format == 'mkv' && features.adaptiveQuality,
+      'segment_seconds': !live && format == 'mkv' ? features.segmentSeconds : 0,
+      'adaptive_quality': !live && format == 'mkv' && features.adaptiveQuality,
+      if (live)
+        'streaming': liveDestinations
+            .where((d) => d.enabled)
+            .map((d) => d.toRequest())
+            .toList(),
+      if (live) 'mix_audio': true,
       'webcam': {
         ...features.webcam,
         'enabled': format != 'gif' && features.webcamEnabled,
@@ -406,19 +442,9 @@ class _RecorderAppState extends State<RecorderApp> {
       'source_kind': source['kind'],
       'width': outWidth,
       'height': outHeight,
-      'fps': fps,
-      'bitrate': bitrate * 1000000,
-      'encoder':
-          (features.annotations ||
-                  (features.layersEnabled &&
-                      recorder.creatorLayers.entries.isNotEmpty) ||
-                  features.shortcutOverlay ||
-                  features.webcamEnabled ||
-                  ((features.cursorHighlight || features.clickEffects) &&
-                      mode != 'window')) &&
-              format != 'gif'
-          ? 'libx264'
-          : encoder,
+      'fps': live ? math.min(fps, 30) : fps,
+      'bitrate': (live ? math.min(bitrate, 4) : bitrate) * 1000000,
+      'encoder': encoder,
       'system_audio': systemAudio && format != 'gif',
       'microphone': microphone && format != 'gif',
       'region': ?crop,
@@ -523,6 +549,7 @@ class _RecorderAppState extends State<RecorderApp> {
         onPreviewToggle: () => setState(() => previewEnabled = !previewEnabled),
         onSettings: () => _showSettings(context),
         onLibrary: () => showRecordingLibrary(context, recorder, mediaJobs),
+        onLive: () => _showLive(context),
         format: format,
         onStart: start,
         summary:

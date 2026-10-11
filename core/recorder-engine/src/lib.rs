@@ -9,11 +9,14 @@ pub mod audio_processor;
 pub mod capture;
 mod error;
 mod frame;
+#[cfg(windows)]
+mod gpu_overlay;
 pub mod layers;
 mod output;
 pub mod overlay;
 mod replay;
 mod session;
+pub mod streaming;
 #[cfg(windows)]
 pub mod wasapi;
 pub mod webcam;

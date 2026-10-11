@@ -84,7 +84,7 @@ class _CreatorStudioState extends State<CreatorStudio> {
       childrenPadding: const EdgeInsets.all(16),
       children: [
         const Text(
-          'Up to four cached overlays. Uses software H.264. Prepare your layout before recording; logo files stay on your PC.',
+          'Up to four cached overlays. Uses GPU composition when available, with CPU fallback. Prepare your layout before recording; logo files stay on your PC.',
         ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
