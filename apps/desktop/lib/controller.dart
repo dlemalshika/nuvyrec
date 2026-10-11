@@ -443,6 +443,87 @@ class RecorderController extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool sceneBusy = false;
+  bool get canEditScene =>
+      !sceneBusy &&
+      status['state'] == 'recording' &&
+      status['scenes_available'] == true &&
+      status['scene_transitioning'] != true;
+
+  /// Prepare Unicode/logo pixels away from the recording owner. The native
+  /// cache swaps all slots together; a failed asset never changes the live take.
+  Future<void> applyScene({
+    required List<dynamic> overlays,
+    required Map<String, dynamic> webcam,
+    required bool layersEnabled,
+    String name = 'Current scene',
+    int durationMs = 0,
+  }) async {
+    if (sceneBusy || scheduledAt != null || (active && !canEditScene)) {
+      throw StateError(
+        'Wait for an active recording and the current transition',
+      );
+    }
+    sceneBusy = true;
+    notifyListeners();
+    final candidate = CreatorLayers();
+    int? transaction;
+    try {
+      await candidate.restore(overlays);
+      if (!candidate.ready) {
+        throw StateError('Scene contains an unavailable logo or text layer');
+      }
+      if (active) {
+        transaction =
+            (_native!.command({'action': 'scene_begin'})['transaction'] as num)
+                .toInt();
+        final entries = layersEnabled ? candidate.entries : <OverlayEntry>[];
+        for (var i = 0; i < entries.length; i++) {
+          final entry = entries[i];
+          _native!.uploadLayer({
+            'transaction': transaction,
+            'id': i,
+            'pixel_width': entry.image!.width,
+            'pixel_height': entry.image!.height,
+            'x': entry.spec.x,
+            'y': entry.spec.y,
+            'width': entry.spec.width,
+            'opacity': entry.spec.opacity,
+          }, entry.rgba!);
+        }
+        // Camera device selection belongs to the session, never a live scene.
+        _native!.command({
+          'action': 'scene_commit',
+          'scene': {
+            'transaction': transaction,
+            'count': entries.length,
+            'name': name,
+            'duration_ms': durationMs,
+            'webcam': {...webcam, 'device': ''},
+          },
+        });
+        transaction = null;
+        if (durationMs > 0) {
+          await Future<void>.delayed(Duration(milliseconds: durationMs ~/ 2));
+        }
+      }
+      if (!_disposed) creatorLayers.adopt(candidate);
+      error = null;
+    } finally {
+      if (transaction != null) {
+        try {
+          _native?.command({
+            'action': 'scene_abort',
+            'transaction': transaction,
+          });
+        } catch (_) {}
+      }
+      candidate.dispose();
+      sceneBusy = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
   void action(String action) {
     if (action == 'stop' && countdown > 0) {
       _countdownTimer?.cancel();

@@ -183,7 +183,7 @@ final class NativeRecorder {
     }
   }
 
-  void command(Map<String, dynamic> command) {
+  Map<String, dynamic> command(Map<String, dynamic> command) {
     final input = jsonEncode(command).toNativeUtf8();
     try {
       final result = _read(_command(input));
@@ -191,6 +191,7 @@ final class NativeRecorder {
         throw StateError(
           result['error']?.toString() ?? 'Native command failed.',
         );
+      return result;
     } finally {
       calloc.free(input);
     }

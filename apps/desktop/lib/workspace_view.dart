@@ -23,6 +23,8 @@ class RecorderWorkspace extends StatelessWidget {
     this.webcam = const {},
     this.onWebcamToggle,
     this.onLive,
+    this.onScenes,
+    this.updateNotice,
   });
   final RecorderController recorder;
   final Widget sourceControls;
@@ -35,6 +37,8 @@ class RecorderWorkspace extends StatelessWidget {
   final Map<String, dynamic> webcam;
   final VoidCallback? onWebcamToggle;
   final VoidCallback? onLive;
+  final VoidCallback? onScenes;
+  final Widget? updateNotice;
 
   @override
   Widget build(BuildContext context) {
@@ -372,6 +376,18 @@ class RecorderWorkspace extends StatelessWidget {
                         child: Column(
                           children: [
                             sourceControls,
+                            ?updateNotice,
+                            if (onScenes != null) ...[
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: onScenes,
+                                  icon: const Icon(Icons.layers_outlined),
+                                  label: const Text('Scenes & live overlays'),
+                                ),
+                              ),
+                            ],
                             const SizedBox(height: 16),
                             Container(
                               padding: const EdgeInsets.all(20),

@@ -10,6 +10,7 @@
 #include <string>
 #include <filesystem>
 #include <algorithm>
+#include <regex>
 #include <mmdeviceapi.h>
 #include <functiondiscoverykeys_devpkey.h>
 
@@ -160,6 +161,19 @@ void RegisterRecorderHost(flutter::BinaryMessenger* messenger, HWND owner, bool 
     } else if (call.method_name() == "hideToTray") {
       if (!tray_added) result->Error("tray", "Tray icon unavailable");
       else { ShowWindow(owner, SW_HIDE); result->Success(); }
+    } else if (call.method_name() == "getAppVersion") {
+      result->Success(flutter::EncodableValue(FLUTTER_VERSION));
+    } else if (call.method_name() == "openReleasePage") {
+      // The updater may only open a GitHub release page, never a local file,
+      // downloaded executable, command line, arbitrary protocol or asset URL.
+      const auto url = Argument(call,"url");
+      const std::regex allowed(R"(^https://github\.com/[A-Za-z0-9-]+/[A-Za-z0-9_.-]+/releases/tag/[A-Za-z0-9.+-]+$)");
+      if (url.size() > 512 || !std::regex_match(url,allowed)) {
+        result->Error("updates","Invalid GitHub release URL"); return;
+      }
+      const auto target = Wide(url);
+      const auto opened = reinterpret_cast<INT_PTR>(ShellExecuteW(owner,L"open",target.c_str(),nullptr,nullptr,SW_SHOWNORMAL));
+      if (opened <= 32) result->Error("updates","Could not open the release page"); else result->Success();
     } else if (call.method_name() == "openRecording") {
       auto path = Wide(Argument(call,"path"));
       auto opened = reinterpret_cast<INT_PTR>(ShellExecuteW(owner,L"open",path.c_str(),nullptr,nullptr,SW_SHOWNORMAL));

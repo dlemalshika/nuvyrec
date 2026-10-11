@@ -10,6 +10,7 @@ class FeatureOptions {
   bool captureCursor = true;
   bool followMouse = false;
   bool layersEnabled = false, shortcutOverlay = false, shortcutRight = false;
+  bool scenesEnabled = false;
   int shortcutSeconds = 2;
   bool annotations = false;
   bool cursorHighlight = false, clickEffects = false;
@@ -50,6 +51,7 @@ class FeatureOptions {
     'capture_cursor': captureCursor,
     'follow_mouse': followMouse,
     'layers_enabled': layersEnabled,
+    'scenes_enabled': scenesEnabled,
     'shortcut_overlay': shortcutOverlay,
     'shortcut_seconds': shortcutSeconds,
     'shortcut_right': shortcutRight,
@@ -113,6 +115,7 @@ class FeatureOptions {
     captureCursor = data['capture_cursor'] as bool? ?? true;
     followMouse = data['follow_mouse'] == true;
     layersEnabled = data['layers_enabled'] == true;
+    scenesEnabled = data['scenes_enabled'] == true;
     shortcutOverlay = data['shortcut_overlay'] == true;
     shortcutRight = data['shortcut_right'] == true;
     shortcutSeconds = bounded('shortcut_seconds', 2, 5).clamp(1, 5);

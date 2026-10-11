@@ -209,6 +209,20 @@ impl Capture {
         cursor: &[crate::overlay::Annotation],
         camera: Option<(&crate::webcam::Image, &crate::webcam::Placement)>,
     ) -> Result<()> {
+        self.update_gpu_scene(layers, marks, cursor, camera, 0.0)
+    }
+
+    /// Fade the composed scene on the same GPU target (no second capture or
+    /// full-frame readback). A value of one covers the canvas with black.
+    #[cfg(windows)]
+    pub fn update_gpu_scene(
+        &mut self,
+        layers: &[crate::layers::Layer],
+        marks: &[crate::overlay::Annotation],
+        cursor: &[crate::overlay::Annotation],
+        camera: Option<(&crate::webcam::Image, &crate::webcam::Placement)>,
+        fade: f32,
+    ) -> Result<()> {
         if !self.gpu_enabled {
             return Err(Error::State("GPU compositor disabled"));
         }
@@ -218,7 +232,7 @@ impl Capture {
                 self.camera_stamp = Some(image.captured);
             }
         }
-        let packet = crate::gpu_overlay::Packet::new(
+        let mut packet = crate::gpu_overlay::Packet::new(
             self.gpu_size,
             layers,
             marks,
@@ -226,6 +240,7 @@ impl Capture {
             camera,
             self.camera_identity,
         )?;
+        packet.fade(fade)?;
         let mut error = [0 as libc::c_char; 512];
         if unsafe {
             native::frame_capture_gpu_update(

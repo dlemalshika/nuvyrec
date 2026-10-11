@@ -5,6 +5,16 @@ OBS/Bandicam competitor requested in the original specification.
 
 ## Implemented
 
+- GitHub update checker in Windows 0.3.0: public repository settings, Stable/Beta
+  channels, daily idle checks, version-aware notifications, cached metadata,
+  Later/Skip preferences and release-page downloads in the system browser.
+  In-app installation and automatic release publishing remain pending.
+
+- Opt-in live visual scenes: twenty saved scenes, four text/logo layers, live
+  webcam visibility/placement/mirror and atomic draft takes. Cut or fade through
+  black uses the existing canvas and encoder. Scenes share the active capture
+  source; multiple captures and crossfades remain pending. See [scenes](scenes.md).
+
 - Flutter native Windows executable with a Rust shared-library engine.
 - RTMP/RTMPS multistream to YouTube/Facebook/TikTok destinations, shared H.264/AAC
   encoding with local MKV/MP4, bounded queues and independent reconnect. Keys
@@ -75,6 +85,24 @@ OBS/Bandicam competitor requested in the original specification.
   See [GPU composition](gpu-composition.md) for bounds and remaining readback.
 
 ## Verified on this machine
+
+- Updates revision: thirty-four Flutter tests and analysis passed, including
+  SemVer ordering, repository URL validation, daily throttling, channel/draft
+  filtering, persistence, failure/source-change handling, recording deferral,
+  and compact dark/light update UI. The actual default latest-release endpoint
+  returned HTTP 404. No remote release was published or installed; a real newer
+  published release is required for end-to-end notification validation.
+
+- Scenes revision: thirty-five Rust tests and twenty-five Flutter tests passed;
+  Clippy with warnings denied and Flutter analysis passed. An owned synthetic
+  window verified atomic cuts, incomplete-take rejection, full-canvas D3D11
+  fades and clearing in actual encoded pixels, in both local MKV and three
+  simultaneous loopback H.264/AAC streams. Compact scene controls fit dark and
+  light themes at 960 × 640. CPU fade tests preserve encoder-retained frames.
+  Real webcam scene placement and sustained low-end performance need manual
+  device testing; tests use generated camera pixels and no real accounts.
+  Packaged startup exited cleanly; a Flutter-generated Unicode/logo take encoded
+  70 frames with D3D11 composition and all 618 expected Sinhala glyph pixels.
 
 - Multistream revision: thirty-three Rust tests and twenty-two Flutter tests
   passed; Clippy with warnings denied and Flutter analysis passed. Synthetic
@@ -166,8 +194,9 @@ observed in short smoke tests; sustained real-time throughput is not guaranteed.
 
 - Tested macOS ScreenCaptureKit/Metal implementation and signed packaging.
 - Android MediaProjection service and iOS ReplayKit broadcast-extension apps.
-- Live Unicode text editing during recording. Current drawing takes place inside
-  Frame's preview; title/logo layers are prepared before starting.
+- Multiple-source scene switching, crossfades and full Studio Mode. Live visual
+  text/logo edits are available through the opt-in scene panel; annotation
+  drawing still takes place inside Frame's preview.
 - Accurate discontinuity/drift correction and long-duration synchronization,
   fault-injection and power-loss recovery tests.
 - Zero-CPU-readback Quick Sync interop and validation on actual NVENC/AMF devices.

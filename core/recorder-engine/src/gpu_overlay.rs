@@ -120,6 +120,30 @@ impl<'a> Packet<'a> {
         p.annotations(cursor)?;
         Ok(p)
     }
+    pub fn fade(&mut self, alpha: f32) -> Result<()> {
+        if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+            return Err(Error::Invalid("invalid scene fade"));
+        }
+        if alpha == 0.0 {
+            return Ok(());
+        }
+        let first = self.vertices.len() as u32;
+        for [u, v] in [[0., 0.], [1., 0.], [0., 1.], [0., 1.], [1., 0.], [1., 1.]] {
+            self.vertices.push(Vertex {
+                position: [u * self.size[0], v * self.size[1]],
+                uv: [0.; 2],
+                color: [0., 0., 0., alpha],
+            });
+        }
+        self.draws.push(Draw {
+            mode: 1,
+            slot: 0,
+            first,
+            count: 6,
+            parameters: [0.; 4],
+        });
+        Ok(())
+    }
     fn image(
         &mut self,
         slot: u32,

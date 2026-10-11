@@ -22,6 +22,7 @@ parser.add_argument('--pan-probe', type=Path, required=True)
 parser.add_argument('--gpu-probe', type=Path, help='Validate GPU overlays with synthetic camera pixels; no real camera is opened')
 parser.add_argument('--webcam-preview', action='store_true', help='Opt-in real camera: verify shared preview/recording and live overlay hide/show; no thumbnail is saved or displayed')
 parser.add_argument('--multistream', action='store_true', help='Use three loopback receivers to verify native FFI live control and silent AAC; no account or audio device is accessed')
+parser.add_argument('--scenes', action='store_true', help='Verify atomic live scene cuts, fade and clear using synthetic pixels only')
 args = parser.parse_args()
 if args.multistream and args.webcam_preview:
     parser.error('Run synthetic multistream and real camera checks separately')
@@ -109,6 +110,8 @@ for name in ['recorder_command_json','recorder_preview_request_json']:
 library.recorder_string_free.argtypes=[c.c_void_p]
 library.recorder_preview_png.argtypes=[c.POINTER(c.c_size_t)];library.recorder_preview_png.restype=c.c_void_p
 library.recorder_preview_free.argtypes=[c.c_void_p,c.c_size_t]
+library.recorder_layer_rgba_json.argtypes=[c.c_char_p,c.c_void_p,c.c_size_t]
+library.recorder_layer_rgba_json.restype=c.c_void_p
 def read(pointer):
     assert pointer
     try: return json.loads(c.string_at(pointer).decode())
@@ -139,11 +142,37 @@ def rgb(path):
     return lambda x,y: tuple(data[(y*160+x)*3:(y*160+x)*3+3])
 def is_red(p):return p[0]>180 and p[1]<80 and p[2]<80
 def is_blue(p):return p[2]>180 and p[0]<80 and p[1]<80
+def take_scene(label, color=None, duration=0, x=.5, y=.5):
+    response=command('scene_begin');assert response['ok'],response
+    token=response['transaction']
+    if color is not None:
+        pixels=(c.c_ubyte*16)(*(color*4))
+        metadata=dict(transaction=token,id=0,pixel_width=2,pixel_height=2,
+                      x=x,y=y,width=.2,opacity=1.)
+        response=read(library.recorder_layer_rgba_json(json.dumps(metadata).encode(),pixels,16))
+        assert response['ok'],response
+    response=command('scene_commit',scene=dict(transaction=token,count=int(color is not None),
+                     name=label,duration_ms=duration,webcam=None))
+    assert response['ok'],response
+
+def verify_scene_video(path):
+    # Decode bounded five-second fixture output, looking at actual encoded pixels.
+    raw=subprocess.check_output([str(sdk/'ffmpeg.exe'),'-v','error','-i',str(path),'-t','6',
+        '-vf','scale=160:180','-f','rawvideo','-pix_fmt','rgb24','-'])
+    stride=160*180*3
+    assert len(raw)%stride==0
+    frames=[raw[i:i+stride] for i in range(0,len(raw),stride)]
+    pixel=lambda f,x,y:tuple(f[(y*160+x)*3:(y*160+x)*3+3])
+    assert any(pixel(f,80,90)[1]>210 and pixel(f,80,90)[0]<40 for f in frames),'Scene cut never reached encoded output'
+    assert any(min(pixel(f,145,150))>220 for f in frames),'Second scene placement missing from encoded output'
+    assert any(max(pixel(f,40,65)+pixel(f,120,65)+pixel(f,80,90))<45 for f in frames),'Fade never covered the whole composed canvas'
+    assert is_red(pixel(frames[-1],40,65)) and is_blue(pixel(frames[-1],120,65)),'Scene clear left stale layers'
 try:
     source=next(s for s in read(library.recorder_sources_json())['sources'] if s['kind']=='window' and s['id']==fixture['hwnd'])
     assert not source['minimized'] and source['width']>=640 and source['height']>360
     config=dict(output=str(directory/'full-window.mkv'),container='mkv',source_kind='window',source_id=source['id'],
                 width=source['width']//2*2,height=source['height']//2*2,fps=30,bitrate=2_000_000,encoder='libx264')
+    if args.scenes:config.update(scenes_enabled=True)
     if args.multistream:
         targets=[]
         for index,platform in enumerate(['youtube','facebook','tiktok']):
@@ -176,10 +205,26 @@ try:
     response=command('start',config);assert response['ok'],response
     hidden=shown=False
     streams_stopped=False
+    scene_one=scene_two=scene_clear=False
     deadline=time.monotonic()+12
     while time.monotonic()<deadline:
         status=read(library.recorder_status_json())
         if status['state']=='failed':raise RuntimeError(status['error'])
+        if args.scenes and status['state']=='recording':
+            assert status['scenes_available'] and status['compositor']=='d3d11',status
+            if status['seconds']>.4 and not scene_one:
+                take_scene('One',[0,255,0,255]);scene_one=True
+                # Rejected incomplete transactions preserve the on-air scene.
+                token=command('scene_begin')['transaction']
+                assert not command('scene_commit',scene=dict(transaction=token,count=1,
+                    name='Incomplete',duration_ms=0,webcam=None))['ok']
+                assert command('scene_abort',transaction=token)['ok']
+                assert not command('clear_layers')['ok']
+            if status['seconds']>1.2 and not scene_two:
+                take_scene('Two',[255,255,255,255],600,1.,1.);scene_two=True
+                assert not command('scene_begin')['ok'],'A transition admitted a third raster bank'
+            if status['seconds']>2.2 and not scene_clear:
+                take_scene('Clean');scene_clear=True
         if args.multistream and status['state']=='recording':
             assert 'frame-owned-test-key' not in json.dumps(status),'Credentials leaked into status'
             if status['seconds']>3 and not streams_stopped:
@@ -201,7 +246,7 @@ try:
             if status['seconds']>2.2:
                 assert hidden and shown and preview_frames>=5 and status['webcam_ready'] and status['webcam_visible'],status
                 break
-        elif status['state']=='recording' and status['seconds']>1:break
+        elif status['state']=='recording' and status['seconds']>(3 if args.scenes else 1):break
         time.sleep(.1)
     else:raise RuntimeError('Owned window did not record')
     assert command('stop')['ok']
@@ -216,7 +261,12 @@ try:
             assert [s['codec_name'] for s in info['streams']]==['h264','aac'],info
             assert 2<float(info['format']['duration'])<4.5,info
             subprocess.run([str(sdk/'ffmpeg.exe'),'-nostdin','-v','error','-i',str(path),'-f','null','-'],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+            if args.scenes:verify_scene_video(path)
         print('Native FFI multistream: three receivers, silent AAC, secret-free status, pause guard and Stop live passed')
+    if args.scenes:
+        assert scene_one and scene_two and scene_clear
+        verify_scene_video(directory/'full-window.mkv')
+        print('Live scenes: atomic cut, rejected incomplete take, full-canvas GPU fade and clear verified in encoded pixels')
     if args.gpu_probe:
         subprocess.run([str(args.gpu_probe.resolve()),str(fixture['hwnd']),str(directory)],check=True)
         def gpu_rgb(label):

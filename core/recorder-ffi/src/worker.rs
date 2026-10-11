@@ -208,6 +208,8 @@ pub struct Request {
     #[serde(default)]
     pub layers_enabled: bool,
     #[serde(default)]
+    pub scenes_enabled: bool,
+    #[serde(default)]
     pub shortcut_overlay: bool,
     #[serde(default = "shortcut_seconds")]
     pub shortcut_seconds: u32,
@@ -332,6 +334,7 @@ impl Worker {
         }
         if (request.annotations_enabled
             || request.layers_enabled
+            || request.scenes_enabled
             || request.shortcut_overlay
             || request.cursor_highlight
             || request.click_effects
@@ -563,7 +566,8 @@ fn run(
         None => String::new(),
     };
     let cursor = u8::from(request.capture_cursor || request.follow_mouse);
-    let effects = request.annotations_enabled
+    let effects = request.scenes_enabled
+        || request.annotations_enabled
         || request.layers_enabled
         || request.shortcut_overlay
         || request.cursor_highlight
@@ -602,7 +606,7 @@ fn run(
                 }
                 #[cfg(windows)]
                 if capture.gpu_overlays_enabled() {
-                    let layers = if request.layers_enabled {
+                    let layers = if request.layers_enabled || request.scenes_enabled {
                         crate::layers::snapshot()?
                     } else {
                         Vec::new()
@@ -663,6 +667,7 @@ fn run(
     let repeat_overlays = !gpu_overlays
         && (camera.is_some()
             || request.layers_enabled
+            || request.scenes_enabled
             || request.shortcut_overlay
             || request.annotations_enabled);
     let mut last_screen = if repeat_overlays {
@@ -695,6 +700,7 @@ fn run(
         value["fallback_reasons"] = json!(failures);
         value["annotations_enabled"] = json!(request.annotations_enabled);
         value["layers_enabled"] = json!(request.layers_enabled);
+        value["scenes_available"] = json!(request.scenes_enabled);
         value["shortcut_overlay"] = json!(request.shortcut_overlay);
         value["shortcut_right"] = json!(request.shortcut_right);
         value["webcam_available"] = json!(request.webcam.enabled);
@@ -1107,7 +1113,13 @@ fn run(
             if pts > last_pts {
                 skipped += (pts - last_pts - 1) as u64;
                 let encoding_started = Instant::now();
+                let mut scene_fade = 0.0;
                 if !gpu_overlays {
+                    let scene = crate::layers::view()?;
+                    scene_fade = scene.fade;
+                    if let Some(c) = &scene.webcam {
+                        webcam_visible.store(c.enabled, Ordering::Release);
+                    }
                     if let Some(camera) = camera
                         .as_ref()
                         .filter(|_| webcam_visible.load(Ordering::Acquire))
@@ -1118,7 +1130,14 @@ fn run(
                                 .filter(|v| v.captured.elapsed() < Duration::from_secs(2))
                             {
                                 frame
-                                    .webcam(image, &request.webcam.placement())
+                                    .webcam(
+                                        image,
+                                        &scene
+                                            .webcam
+                                            .as_ref()
+                                            .unwrap_or(&request.webcam)
+                                            .placement(),
+                                    )
                                     .map_err(|e| e.to_string())?;
                             }
                         }
@@ -1127,9 +1146,9 @@ fn run(
                         let marks = annotations.lock().map_err(|_| "Annotation lock failed")?;
                         frame.annotate(&marks).map_err(|e| e.to_string())?;
                     }
-                    if request.layers_enabled {
+                    if request.layers_enabled || request.scenes_enabled {
                         frame
-                            .raster_layers(&crate::layers::snapshot()?)
+                            .raster_layers(&scene.layers)
                             .map_err(|e| e.to_string())?;
                     }
                     #[cfg(windows)]
@@ -1169,6 +1188,9 @@ fn run(
                         }
                     }
                 }
+                if !gpu_overlays && request.scenes_enabled {
+                    frame.fade_to_black(scene_fade).map_err(|e| e.to_string())?;
+                }
                 session
                     .write_video(
                         &mut frame,
@@ -1184,6 +1206,13 @@ fn run(
             thread::sleep(Duration::from_millis(2));
         }
         if last_event.elapsed() >= Duration::from_millis(200) {
+            if request.scenes_enabled {
+                let (_, _, name) = crate::layers::visual()?;
+                if let Ok(mut value) = status.lock() {
+                    value["scene_name"] = json!(name);
+                    value["scene_transitioning"] = json!(crate::layers::transitioning()?);
+                }
+            }
             if request.shortcut_overlay {
                 if let Ok(mut value) = status.lock() {
                     value["shortcut_label"] = json!(shortcuts.label());
@@ -1334,8 +1363,12 @@ fn refresh_gpu_overlays(
     shortcut: Option<&recorder_engine::layers::Layer>,
     cursor: &[recorder_engine::overlay::Annotation],
 ) -> Result<(), String> {
-    let mut layers = if request.layers_enabled {
-        crate::layers::snapshot()?
+    let scene = crate::layers::view()?;
+    if let Some(c) = &scene.webcam {
+        visible.store(c.enabled, Ordering::Release);
+    }
+    let mut layers = if request.layers_enabled || request.scenes_enabled {
+        scene.layers
     } else {
         Vec::new()
     };
@@ -1350,13 +1383,19 @@ fn refresh_gpu_overlays(
     };
     let camera = camera.filter(|_| visible.load(Ordering::Acquire));
     let image = camera.and_then(|c| c.latest.lock().ok());
-    let place = request.webcam.placement();
+    let place = scene.webcam.as_ref().unwrap_or(&request.webcam).placement();
     let image = image
         .as_ref()
         .and_then(|i| i.as_ref())
         .filter(|i| i.captured.elapsed() < Duration::from_secs(2));
     capture
-        .update_gpu_overlays(&layers, annotations, cursor, image.map(|i| (i, &place)))
+        .update_gpu_scene(
+            &layers,
+            annotations,
+            cursor,
+            image.map(|i| (i, &place)),
+            scene.fade,
+        )
         .map_err(|e| e.to_string())
 }
 

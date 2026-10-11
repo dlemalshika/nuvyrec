@@ -81,6 +81,41 @@ impl Layer {
     }
 }
 impl VideoFrame {
+    /// Limited-range BT.709 CPU fallback. Make the frame writable before
+    /// touching pixels: the encoder or repeat-frame cache can share its buffer.
+    pub fn fade_to_black(&mut self, alpha: f32) -> Result<()> {
+        if !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+            return Err(Error::Invalid("invalid scene fade"));
+        }
+        if alpha == 0.0 {
+            return Ok(());
+        }
+        unsafe {
+            if (*self.raw).format != av::AVPixelFormat::AV_PIX_FMT_YUV420P as i32 {
+                return Err(Error::Invalid("scene fades require CPU YUV420P"));
+            }
+            check(av::av_frame_make_writable(self.raw), "prepare scene fade")?;
+            let strength = (alpha * 256.0).round() as u32;
+            for plane in 0..3 {
+                let divisor = if plane == 0 { 1 } else { 2 };
+                let width = (*self.raw).width as usize / divisor;
+                let height = (*self.raw).height as usize / divisor;
+                let target = if plane == 0 { 16 } else { 128 };
+                for y in 0..height {
+                    let row = std::slice::from_raw_parts_mut(
+                        (*self.raw).data[plane]
+                            .offset(y as isize * (*self.raw).linesize[plane] as isize),
+                        width,
+                    );
+                    for pixel in row {
+                        *pixel = ((u32::from(*pixel) * (256 - strength) + target * strength + 128)
+                            / 256) as u8;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
     /// Blend only each layer's bounding rectangle. Alpha for a chroma sample
     /// averages its four luma pixels, preserving transparent edges on YUV420P.
     pub fn raster_layers(&mut self, layers: &[Layer]) -> Result<()> {
@@ -205,5 +240,31 @@ mod tests {
             .unwrap()
             .raster_layers(&[layer])
             .is_err());
+    }
+    #[test]
+    fn cpu_fade_preserves_shared_frames_and_reaches_limited_black() {
+        let mut frame = VideoFrame::new(8, 8).unwrap();
+        frame
+            .raster_layers(&[Layer {
+                raster: Arc::new(Raster::rgba(1, 1, &[255; 4]).unwrap()),
+                x: 0.0,
+                y: 0.0,
+                width: 1.0,
+                opacity: 1.0,
+            }])
+            .unwrap();
+        let retained = frame.try_clone().unwrap();
+        frame.fade_to_black(0.5).unwrap();
+        unsafe {
+            assert!(*(*retained.raw).data[0] > 230);
+            assert!((120..=130).contains(&*(*frame.raw).data[0]));
+        }
+        frame.fade_to_black(1.0).unwrap();
+        unsafe {
+            for plane in 0..3 {
+                assert_eq!(*(*frame.raw).data[plane], if plane == 0 { 16 } else { 128 });
+            }
+        }
+        assert!(frame.fade_to_black(f32::NAN).is_err());
     }
 }

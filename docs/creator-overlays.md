@@ -8,8 +8,10 @@ opacity and ordering. Text supports Sinhala and other Unicode through Flutter's
 native font shaping; available system fonts determine glyph coverage. Titles
 can use a readable background plate and selected color/font size.
 
-Prepare the layers before starting. Editing/loading is locked while a recording
-or schedule is active. Missing or invalid logo files show an error; enabled
+Prepare these creator layouts before starting. This settings editor is locked
+while a recording or schedule is active. For live edits use the main workspace's
+**Scenes & live overlays** panel and enable scenes before recording. Its drafts
+are committed atomically; see [live scenes](scenes.md). Missing or invalid logo files show an error; enabled
 incomplete layers prevent recording from starting. Save up to twenty named
 creator layouts containing layers, feature settings and video quality. Loading
 a layout reloads its local logo files. Layouts do not select a different capture
@@ -42,7 +44,8 @@ the screen surface on the GPU. Quick Sync/software still read back the composed
 canvas. Small raster/camera textures are uploaded from RAM. See
 [GPU composition](gpu-composition.md) for bounds and verification.
 Saved layouts are a single screen/window/region plus optional webcam and raster
-layers; multiple simultaneous screens/cameras and scene transitions remain work.
+layers. Cut and fade-through-black visual scenes are available; multiple
+simultaneous screens/cameras and transitions between capture sources remain work.
 
 ## Repeatable integration check
 

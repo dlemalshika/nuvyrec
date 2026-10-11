@@ -1,10 +1,20 @@
 # Windows feature build
 
-Run `artifacts/Frame-Windows-Multistream/Frame.exe`, keeping the bundle together.
+Run `artifacts/Frame-Windows-Updates/Frame.exe`, keeping the bundle together.
+
+Settings → **App updates** checks GitHub Releases. Choose Stable or Beta,
+enable daily checks or use Check now, and read notes/download in your browser.
+See [updates and publishing](updates.md). This build never installs or restarts
+itself automatically.
 
 Open **Live** in the header to configure YouTube, Facebook and TikTok server/key
 destinations and start streaming with local recording. See [live setup](live-streaming.md)
 for account access, upload capacity, reconnect and shared-picture limitations.
+
+Open **Scenes & live overlays** beside the capture controls. Enable live scenes
+before recording, save visual layouts and use **Take live** for a Cut or Fade
+through black without restarting encoding. Edit draft titles/logos and camera
+placement, then apply them together. See [scene setup and limits](scenes.md).
 
 ## Recording
 

@@ -102,7 +102,7 @@ class OverlayEntry {
 }
 
 /// Render on edits, never on recording frames. Four 768x256 images fit within
-/// the native 4 MiB cache. A generation guard discards stale asynchronous loads.
+/// the native 8 MiB RGBA/fallback cache. A generation guard discards stale loads.
 class CreatorLayers extends ChangeNotifier {
   final List<OverlayEntry> entries = [];
   int _generation = 0;
@@ -111,6 +111,23 @@ class CreatorLayers extends ChangeNotifier {
   bool get ready => !loading && entries.every((e) => e.ready);
   List<Map<String, dynamic>> toJson() =>
       entries.map((e) => e.spec.toJson()).toList();
+
+  /// Transfer fully prepared assets after the native scene transaction succeeds.
+  /// The previous usable UI layout survives missing files and rejected takes.
+  void adopt(CreatorLayers candidate) {
+    if (!candidate.ready) throw StateError('Scene assets are not ready');
+    _generation++;
+    for (final entry in entries) {
+      entry.dispose();
+    }
+    entries
+      ..clear()
+      ..addAll(candidate.entries);
+    candidate.entries.clear();
+    loading = false;
+    notifyListeners();
+  }
+
   Future<void> restore(List<dynamic> data) async {
     final specs = data
         .take(4)

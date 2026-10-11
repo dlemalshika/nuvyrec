@@ -19,8 +19,10 @@ Priorities are recommendations for Frame's lightweight recorder focus.
 | Cursor highlight/click rings, shortcut display | Implemented; shortcuts opt-in, ordinary typing excluded, GPU composition / CPU fallback |
 | GPU overlays/compositing | Implemented on Windows D3D11; hardware encoder choice preserved; generated-pixel GPU validation passed |
 | Webcam/chroma key | Implemented; bounded camera worker, actual capture verified |
-| Text/logo layers and saved creator layouts | Implemented; four cached layers, twenty layouts; live text editing and multi-source transitions pending |
+| Text/logo layers and saved creator layouts | Implemented; four cached layers, twenty layouts; live visual editing through the Scenes panel |
+| Live visual scenes and transitions | Implemented; twenty scenes on one capture source, atomic takes, Cut / Fade through black and live webcam placement; multiple capture sources pending |
 | RTMP/RTMPS multistream and reconnect | Implemented Windows alpha; real platform validation pending |
+| GitHub release notifications | Implemented; daily idle checks, Stable/Beta, Later/Skip and browser downloads; automatic installation pending |
 | SRT, platform account integrations, automatic captions/smart zoom | Pending |
 | Adaptive quality | Implemented for segmented MKV; measured overload reduces quality without increasing resources |
 | HEVC/AV1/HDR | Pending |

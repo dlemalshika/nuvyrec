@@ -11,6 +11,9 @@ import 'recording_library.dart';
 import 'creator_studio.dart';
 import 'creator_layers.dart';
 import 'live_streaming.dart';
+import 'scene_studio.dart';
+import 'app_updates.dart';
+import 'update_panel.dart';
 
 class RecorderApp extends StatefulWidget {
   const RecorderApp({super.key, this.controller});
@@ -29,6 +32,7 @@ class _RecorderAppState extends State<RecorderApp> {
   int _themeRevision = 0;
   final features = FeatureOptions();
   final mediaJobs = MediaJobs();
+  final updates = UpdateController();
   final liveDestinations = [
     LiveDestination('youtube', 'YouTube'),
     LiveDestination('facebook', 'Facebook'),
@@ -36,6 +40,7 @@ class _RecorderAppState extends State<RecorderApp> {
   ];
   List<Map<String, dynamic>> savedPresets = [];
   List<Map<String, dynamic>> creatorLayouts = [];
+  List<Map<String, dynamic>> scenes = [];
   Timer? _preferenceTimer;
   FrameColors get _colors => FrameColors(_themeMode == ThemeMode.light);
   final region = List.generate(4, (_) => TextEditingController());
@@ -60,6 +65,18 @@ class _RecorderAppState extends State<RecorderApp> {
         recorder.preferences['overlays'] as List? ?? [],
       );
       if (!mounted) return;
+      try {
+        updates.currentVersion = await RecorderController.host
+            .invokeMethod<String>('getAppVersion');
+      } catch (_) {}
+      if (!mounted) return;
+      final updatePrefs = recorder.preferences['updates'];
+      if (updatePrefs is Map) updates.restore(updatePrefs);
+      updates.onPersist = () {
+        recorder.preferences['updates'] = updates.toJson();
+        recorder.savePreferences();
+      };
+      updates.start(() => !recorder.active && recorder.scheduledAt == null);
       creatorLayouts = (recorder.preferences['creator_layouts'] as List? ?? [])
           .whereType<Map>()
           .where(
@@ -87,6 +104,19 @@ class _RecorderAppState extends State<RecorderApp> {
           .map((p) => Map<String, dynamic>.from(p))
           .take(50)
           .toList();
+      scenes = (recorder.preferences['scenes'] as List? ?? [])
+          .whereType<Map>()
+          .where(
+            (s) =>
+                s['name'] is String &&
+                (s['name'] as String).isNotEmpty &&
+                (s['name'] as String).runes.length <= 48 &&
+                s['overlays'] is List &&
+                s['webcam'] is Map,
+          )
+          .take(20)
+          .map((s) => Map<String, dynamic>.from(s))
+          .toList();
       setState(() {});
     } catch (_) {
       /* Invalid optional preferences do not prevent recording. */
@@ -100,9 +130,25 @@ class _RecorderAppState extends State<RecorderApp> {
       recorder.preferences['presets'] = savedPresets;
       recorder.preferences['overlays'] = recorder.creatorLayers.toJson();
       recorder.preferences['creator_layouts'] = creatorLayouts;
+      recorder.preferences['scenes'] = scenes;
       recorder.savePreferences();
     });
   }
+
+  Future<void> _showScenes(BuildContext context) => showDialog<void>(
+    context: context,
+    builder: (context) => SceneStudio(
+      recorder: recorder,
+      options: features,
+      scenes: scenes,
+      onChanged: () {
+        if (mounted) {
+          setState(() {});
+          _saveFeatures();
+        }
+      },
+    ),
+  );
 
   void _preset(Map<String, dynamic> preset) {
     if (['automatic', 'eco', 'manual'].contains(preset['performance_mode'])) {
@@ -319,6 +365,7 @@ class _RecorderAppState extends State<RecorderApp> {
 
   @override
   void dispose() {
+    updates.dispose();
     mediaJobs.dispose();
     _preferenceTimer?.cancel();
     recorder.onStartRequested = null;
@@ -410,6 +457,7 @@ class _RecorderAppState extends State<RecorderApp> {
     final extras = features.toJson()..remove('countdown');
     return {
       ...extras,
+      'scenes_enabled': format != 'gif' && features.scenesEnabled,
       'layers_enabled':
           format != 'gif' &&
           features.layersEnabled &&
@@ -523,6 +571,10 @@ class _RecorderAppState extends State<RecorderApp> {
       animation: recorder,
       builder: (context, _) => RecorderWorkspace(
         recorder: recorder,
+        updateNotice: UpdateNotice(
+          updates: updates,
+          onDetails: () => _showUpdates(context),
+        ),
         sourceControls: _sourceControls(),
         previewSource: previewSource,
         previewEnabled: previewEnabled,
@@ -550,6 +602,7 @@ class _RecorderAppState extends State<RecorderApp> {
         onSettings: () => _showSettings(context),
         onLibrary: () => showRecordingLibrary(context, recorder, mediaJobs),
         onLive: () => _showLive(context),
+        onScenes: () => _showScenes(context),
         format: format,
         onStart: start,
         summary:
@@ -697,6 +750,23 @@ class _RecorderAppState extends State<RecorderApp> {
     ]);
   }
 
+  Future<void> _showUpdates(BuildContext context) => showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('App updates'),
+      content: SizedBox(
+        width: 480,
+        child: SingleChildScrollView(child: UpdatePanel(updates: updates)),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+      ],
+    ),
+  );
+
   Future<void> _showSettings(BuildContext context) => showDialog<void>(
     context: context,
     builder: (context) => StatefulBuilder(
@@ -734,6 +804,11 @@ class _RecorderAppState extends State<RecorderApp> {
                           ),
                         ),
                         const Spacer(),
+                        IconButton(
+                          onPressed: () => _showUpdates(context),
+                          tooltip: 'App updates',
+                          icon: const Icon(Icons.system_update_alt),
+                        ),
                         IconButton(
                           onPressed: () => Navigator.pop(context),
                           tooltip: 'Close settings',
@@ -853,6 +928,8 @@ class _RecorderAppState extends State<RecorderApp> {
                                   change(() => previewEnabled = v),
                             ),
                           ]),
+                          const SizedBox(height: 16),
+                          _panel('UPDATES', [UpdatePanel(updates: updates)]),
                         ],
                       ),
                     ),

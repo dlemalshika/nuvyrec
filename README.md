@@ -6,7 +6,7 @@ is still in progress; see [release status](docs/release-status.md) for exact gap
 
 ## Run the local Windows build
 
-Open the latest build at `artifacts/Frame-Windows-GpuOverlays/Frame.exe`. Keep the entire folder together: Flutter
+Open the latest build at `artifacts/Frame-Windows-Updates/Frame.exe`. Keep the entire folder together: Flutter
 assets, recorder_core.dll and the matching FFmpeg runtime DLLs are required.
 Choose a display, window or display region, choose a new output file, then record.
 The main workspace shows a live thumbnail preview. Open **Settings** for video,
@@ -29,6 +29,10 @@ See [GPU composition](docs/gpu-composition.md) for accelerated overlays, encoder
 selection, memory bounds and the remaining CPU readback paths.
 See [live streaming](docs/live-streaming.md) for YouTube/Facebook/TikTok setup,
 shared encoding, upload requirements and account-specific limits.
+See [GitHub updates](docs/updates.md) for daily checks, Stable/Beta channels,
+update notifications and preparing a versioned release ZIP.
+See [live scenes](docs/scenes.md) for saved visual layouts, atomic live editing,
+webcam placement and Cut / Fade-through-black transitions on one capture source.
 
 ## Current features
 
@@ -95,7 +99,7 @@ has no capture backend; Android/iOS are not implemented.
 
 ## Remaining work
 
-Live text editing, multiple capture sources and scene transitions, SRT/platform integrations,
+Multiple simultaneous capture sources, source-changing transitions, SRT/platform integrations,
 automatic captions/smart zoom, HEVC/AV1/HDR, long-duration sync,
 full GPU Quick Sync interop, macOS/Android/iOS backends, full-rate GPU preview,
 fault-injection recovery testing, signed installers and sustained low-end/4K120

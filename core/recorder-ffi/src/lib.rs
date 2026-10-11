@@ -24,7 +24,7 @@ fn guard(operation: impl FnOnce() -> serde_json::Value) -> *mut c_char {
 }
 #[no_mangle]
 pub extern "C" fn recorder_abi_version() -> u32 {
-    0x0001_0500
+    0x0001_0600
 }
 /// # Safety
 /// text is valid NUL-terminated JSON containing webcam and low_resource.
@@ -106,7 +106,16 @@ pub unsafe extern "C" fn recorder_layer_rgba_json(
         }
         let result = serde_json::from_slice(unsafe { CStr::from_ptr(text) }.to_bytes())
             .map_err(|e| e.to_string())
-            .and_then(|meta| {
+            .and_then(|meta: layers::Upload| {
+                if meta.transaction.is_none() {
+                    let worker = WORKER
+                        .get_or_init(|| Mutex::new(None))
+                        .lock()
+                        .map_err(|_| "Native control lock failed")?;
+                    if worker.as_ref().is_some_and(|w| !w.finished()) {
+                        return Err("Use a scene transaction during recording".into());
+                    }
+                }
                 layers::upload(meta, unsafe { std::slice::from_raw_parts(pixels, length) })
             });
         match result {
@@ -193,6 +202,59 @@ pub unsafe extern "C" fn recorder_command_json(text: *const c_char) -> *mut c_ch
             Err(_) => return json!({"ok":false,"error":"Native control lock failed"}),
         };
         match command["action"].as_str().unwrap_or("") {
+            "scene_begin" => match layers::begin() {
+                Ok(token) => json!({"ok":true,"transaction":token}),
+                Err(error) => json!({"ok":false,"error":error}),
+            },
+            "scene_abort" => match command["transaction"]
+                .as_u64()
+                .ok_or_else(|| "Invalid scene transaction".to_owned())
+                .and_then(layers::abort)
+            {
+                Ok(()) => json!({"ok":true}),
+                Err(error) => json!({"ok":false,"error":error}),
+            },
+            "scene_commit" => {
+                let Some(worker) = locked.as_ref().filter(|w| !w.finished()) else {
+                    return json!({"ok":false,"error":"No active recording"});
+                };
+                let ready = worker
+                    .status
+                    .lock()
+                    .map(|s| s["state"] == "recording" && s["scenes_available"] == true)
+                    .unwrap_or(false);
+                if !ready
+                    || worker.pause.load(Ordering::Acquire)
+                    || worker.stop.load(Ordering::Acquire)
+                {
+                    return json!({"ok":false,"error":"Live scenes require an active H.264 recording"});
+                }
+                let value: layers::SceneCommit =
+                    match serde_json::from_value(command["scene"].clone()) {
+                        Ok(value) => value,
+                        Err(_) => return json!({"ok":false,"error":"Invalid scene settings"}),
+                    };
+                if value
+                    .webcam
+                    .as_ref()
+                    .is_some_and(|c| c.enabled && !worker.webcam_available)
+                {
+                    return json!({"ok":false,"error":"Enable webcam before starting the recording"});
+                }
+                let webcam = value.webcam.as_ref().map(|c| c.enabled);
+                match layers::commit(value) {
+                    Ok(()) => {
+                        // Visibility switches with the scene at the transition midpoint.
+                        if let Some(visible) = webcam {
+                            if command["scene"]["duration_ms"] == 0 {
+                                worker.webcam_visible.store(visible, Ordering::Release);
+                            }
+                        }
+                        json!({"ok":true})
+                    }
+                    Err(error) => json!({"ok":false,"error":error}),
+                }
+            }
             "webcam_visible" => {
                 let Some(worker) = locked.as_ref().filter(|w| !w.finished()) else {
                     return json!({"ok":false,"error":"No active recording"});
@@ -204,10 +266,16 @@ pub unsafe extern "C" fn recorder_command_json(text: *const c_char) -> *mut c_ch
                     return json!({"ok":false,"error":"Webcam visibility must be boolean"});
                 };
                 worker.webcam_visible.store(enabled, Ordering::Release);
+                if let Err(error) = layers::camera_visible(enabled) {
+                    return json!({"ok":false,"error":error});
+                }
                 if let Ok(mut status) = worker.status.lock() {
                     status["webcam_visible"] = json!(enabled);
                 }
                 json!({"ok":true})
+            }
+            "clear_layers" if locked.as_ref().is_some_and(|w| !w.finished()) => {
+                json!({"ok":false,"error":"Use a scene transaction during recording"})
             }
             "clear_layers" => match layers::clear() {
                 Ok(()) => json!({"ok":true}),
@@ -325,6 +393,9 @@ pub unsafe extern "C" fn recorder_command_json(text: *const c_char) -> *mut c_ch
                 };
                 if worker.finished() {
                     return json!({"ok":false,"error":"Recording has already ended"});
+                }
+                if command["action"] == "pause" && layers::transitioning().unwrap_or(true) {
+                    return json!({"ok":false,"error":"Wait for the scene transition before pausing"});
                 }
                 if command["action"] == "pause"
                     && worker
