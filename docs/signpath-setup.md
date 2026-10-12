@@ -86,6 +86,8 @@ Do not change signed bytes after signing, or reuse v1.0.0 to replace downloads.
 ## Validation limits
 
 Local script syntax, artifact configuration structure, DLL version metadata and
-unsigned-artifact rejection can be checked before onboarding. The actual signing
-requests, XML validation by SignPath, clean GitHub-hosted build and SmartScreen
-behavior require external accounts/service approval and real end-to-end testing.
+unsigned-artifact rejection have been checked. The clean GitHub-hosted unsigned
+build, tests, installer and portable archive passed in
+[run 38232333284](https://github.com/dlemalshika/nuvyrec/actions/runs/38232333284).
+The actual signing requests, XML validation by SignPath and SmartScreen behavior
+still require service approval and real end-to-end testing.
