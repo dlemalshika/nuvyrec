@@ -23,10 +23,12 @@ if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain selection failed.' }
 $ciFlutter = Join-Path $ciRoot '.deps\flutter'
 & git init $ciFlutter
 & git -C $ciFlutter remote add origin https://github.com/flutter/flutter.git
-& git -C $ciFlutter fetch --depth 1 origin 2c9eb20739dfec95e2c74bd3dfa4601b0a8a36aa
+& git -C $ciFlutter fetch --depth 1 origin refs/tags/3.41.5:refs/tags/3.41.5
 if ($LASTEXITCODE -ne 0) { throw 'Flutter source fetch failed.' }
-& git -C $ciFlutter checkout --detach FETCH_HEAD
+& git -C $ciFlutter checkout --detach 3.41.5
 if ($LASTEXITCODE -ne 0) { throw 'Flutter checkout failed.' }
+$ciFlutterRevision = & git -C $ciFlutter rev-parse HEAD
+if ($LASTEXITCODE -ne 0 -or $ciFlutterRevision -ne '2c9eb20739dfec95e2c74bd3dfa4601b0a8a36aa') { throw 'Flutter tag differs from the pinned revision.' }
 "$ciFlutter\bin" | Add-Content -LiteralPath $env:GITHUB_PATH
 $ciCompiler = Join-Path $ciRoot '.deps\innosetup-6.7.3.exe'
 Get-VerifiedDependency 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' $ciCompiler '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732'
