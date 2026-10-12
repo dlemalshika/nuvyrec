@@ -1,6 +1,6 @@
 # Native multistreaming (Windows alpha)
 
-Frame can send one encoded H.264 picture and one AAC playback track to up to
+Nuvyrec can send one encoded H.264 picture and one AAC playback track to up to
 three independent RTMP/RTMPS destinations: YouTube, Facebook and TikTok. A local
 MKV or MP4 recording is kept at the same time. This feature uses FFmpeg libraries
 in the Rust core; it does not launch an encoder process or embed a browser.
@@ -11,7 +11,7 @@ in the Rust core; it does not launch an encoder process or embed a browser.
    Enable system sound and/or microphone as needed.
 2. Open **Live** in the workspace header. Select the desired platforms and paste
    each platform's server URL and stream key. Prefer RTMPS when provided.
-3. Click **Start live + record**. Frame requests up to 720p, 30 fps and 4 Mbps,
+3. Click **Start live + record**. Nuvyrec requests up to 720p, 30 fps and 4 Mbps,
    bounded by the selected quality and machine performance mode. Both audio
    sources are mixed into the first playback track; local source tracks remain.
    With both sources disabled, a silent AAC track is generated for ingest
@@ -24,7 +24,7 @@ in the Rust core; it does not launch an encoder process or embed a browser.
    hotkey Stop and closing the app also stop the streams.
    End the broadcast in each platform's dashboard/app as well.
 
-TikTok must provide encoder server/key access for your account. Frame cannot
+TikTok must provide encoder server/key access for your account. Nuvyrec cannot
 grant LIVE eligibility or bypass restrictions. YouTube and Facebook also require
 an eligible account and a valid destination/key. Enter credentials locally;
 do not paste them into an issue, screenshot or chat.

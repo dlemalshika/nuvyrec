@@ -1,6 +1,6 @@
 # Windows feature build
 
-Run `artifacts/Frame-Windows-Updates/Frame.exe`, keeping the bundle together.
+Run `artifacts/Nuvyrec-Windows-Release/Nuvyrec.exe`, keeping the bundle together.
 
 Settings → **App updates** checks GitHub Releases. Choose Stable or Beta,
 enable daily checks or use Check now, and read notes/download in your browser.
@@ -25,7 +25,7 @@ placement, then apply them together. See [scene setup and limits](scenes.md).
 4. Start recording; use pause/resume or stop/save at the bottom.
 
 Ctrl+Shift+F9 starts/stops, F10 pauses/resumes, F11 saves replay. Settings reports
-shortcut conflicts. The tray menu provides the same controls and restores Frame.
+shortcut conflicts. The tray menu provides the same controls and restores Nuvyrec.
 
 The Low-end PC preset selects 720p/24fps/3Mbps. Keep optional CPU effects off and
 Low-resource mode suspends the thumbnail preview during recording. See
@@ -58,9 +58,9 @@ Enable replay and choose its duration and encoded-payload memory budget before
 starting. Save with the replay button or F11, selecting a new MKV file. A small
 budget can shorten high-bitrate history; clips begin on an available keyframe.
 
-Schedule a future start while Frame stays open. Duration/file-size limits stop
+Schedule a future start while Nuvyrec stays open. Duration/file-size limits stop
 and finalize the recording automatically; file-size limits can overshoot by
-buffered packets. Closing Frame cancels pending schedules/countdowns.
+buffered packets. Closing Nuvyrec cancels pending schedules/countdowns.
 
 MKV recovery segments finalize playable parts at the selected interval. Earlier
 completed parts survive an abrupt exit; the active part is not guaranteed. Replay
@@ -76,7 +76,7 @@ reveals, exports or removes metadata while keeping the original file.
 MP4 remux copies compatible encoded tracks without quality loss. Trim/crop
 re-encode with two CPU threads; enter seconds and source-pixel crop coordinates.
 Progress/cancellation appear in the library. Finish/cancel exports before closing
-Frame. The camera button saves a new PNG still from the selected source.
+Nuvyrec. The camera button saves a new PNG still from the selected source.
 
 See [implementation status](professional-features.md) and
 [tested scope](release-status.md) for pending advanced/platform capabilities.

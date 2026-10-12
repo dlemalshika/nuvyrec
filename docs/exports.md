@@ -3,7 +3,7 @@
 Open **Recordings**, use a recording's menu → **Trim / crop / export**, and
 choose **Share / compress**. Choose a preset and audio mode, optionally enter a
 start time and duration, then **Export** to a new filename. Import also accepts
-local video files; Frame does not search folders automatically.
+local video files; Nuvyrec does not search folders automatically.
 
 | Preset | Output |
 |---|---|
@@ -13,7 +13,7 @@ local video files; Frame does not search folders automatically.
 | Square / social | Padded 1080 × 1080 canvas, at most 30 fps; CRF 23 |
 | Small file | At most 1280 × 720 and 30 fps; CRF 28 |
 
-These are Frame defaults, not upload-platform requirements. Share presets preserve
+These are Nuvyrec defaults, not upload-platform requirements. Share presets preserve
 aspect ratio, normalize non-square pixels and never enlarge source content.
 Social canvases add black padding rather than crop or stretch the recording.
 Slower source frame rates remain unchanged. Trim/crop operations can also use a

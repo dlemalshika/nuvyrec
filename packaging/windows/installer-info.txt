@@ -1,0 +1,15 @@
+Nuvyrec - Windows screen recorder
+
+Windows 10 version 1903 or later, or Windows 11, on an x64-compatible computer.
+This installer includes the application and its runtime libraries. Users do not
+need to install Flutter, Rust or FFmpeg separately.
+
+Before upgrading, save and stop recording and exit Nuvyrec (including the tray).
+Installation is for your current Windows user and does not require administrator
+rights. A Start Menu shortcut is created; the Desktop shortcut is optional.
+
+Your recordings and saved user preferences are preserved by uninstall.
+This is a Windows capture alpha. See the included release-status.md for limits.
+
+The current app opens GitHub release pages for updates. Installation of a newer
+version is manual. The new release's Setup.exe can update an existing install.

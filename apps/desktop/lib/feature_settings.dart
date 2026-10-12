@@ -545,7 +545,7 @@ class FeatureSettings extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Keep Frame open. A schedule is cancelled when the app exits.',
+              'Keep Nuvyrec open. A schedule is cancelled when the app exits.',
             ),
             if (recorder.scheduledAt != null)
               TextButton(

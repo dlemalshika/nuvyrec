@@ -1,8 +1,8 @@
 [CmdletBinding()]
 param(
     [switch]$SkipBuild,
-    [ValidatePattern('^Frame-Windows(?:-[A-Za-z0-9]+)*$')]
-    [string]$BundleName = 'Frame-Windows',
+    [ValidatePattern('^Nuvyrec-Windows(?:-[A-Za-z0-9]+)*$')]
+    [string]$BundleName = 'Nuvyrec-Windows',
     [ValidatePattern('^target(?:[\\/][A-Za-z0-9_-]+)*$')]
     [string]$NativeTargetDir = 'target'
 )
@@ -21,7 +21,7 @@ try {
         } finally { Pop-Location }
     }
     $bundleRoot = Join-Path (Join-Path $taskRoot 'artifacts') $BundleName
-    $existingExecutable = Join-Path $bundleRoot 'Frame.exe'
+    $existingExecutable = Join-Path $bundleRoot 'Nuvyrec.exe'
     if (Test-Path -LiteralPath $existingExecutable) {
         try {
             $check = [System.IO.File]::Open($existingExecutable, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
@@ -31,7 +31,8 @@ try {
         }
     }
     New-Item -ItemType Directory -Path $bundleRoot -Force | Out-Null
-    Copy-Item -Path (Join-Path $taskRoot 'apps\desktop\build\windows\x64\runner\Release\*') -Destination $bundleRoot -Recurse -Force
+    # A renamed CMake target may leave old executable outputs in Release.
+    Copy-Item -Path (Join-Path $taskRoot 'apps\desktop\build\windows\x64\runner\Release\*') -Exclude 'Frame.exe','Frame.pdb' -Destination $bundleRoot -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $taskRoot "$NativeTargetDir\release\recorder_core.dll") -Destination $bundleRoot -Force
     Copy-Item -Path "$env:FFMPEG_DIR\bin\*.dll" -Destination $bundleRoot -Force
     Copy-Item -LiteralPath "$env:FFMPEG_DIR\bin\ffmpeg.exe","$env:FFMPEG_DIR\bin\ffprobe.exe" -Destination $bundleRoot -Force
@@ -51,5 +52,5 @@ try {
         [pscustomobject]@{ path = [System.IO.Path]::GetRelativePath($bundleRoot, $_.FullName); sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLower() }
     }
     $manifest | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $bundleRoot 'manifest.json') -Encoding utf8
-    Write-Host "Runnable bundle: $bundleRoot\Frame.exe"
+    Write-Host "Runnable bundle: $bundleRoot\Nuvyrec.exe"
 } finally { Pop-Location }

@@ -1,6 +1,6 @@
 # Window capture and Follow mouse
 
-Use the latest local bundle at `artifacts/Frame-Windows-Creator/Frame.exe`.
+Use the latest local bundle at `artifacts/Nuvyrec-Windows-Creator/Nuvyrec.exe`.
 Keep the runtime files beside the executable.
 
 ## Windows

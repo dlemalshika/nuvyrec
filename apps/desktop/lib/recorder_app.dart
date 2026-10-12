@@ -562,7 +562,7 @@ class _RecorderAppState extends State<RecorderApp> {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'Frame — Screen Recorder',
+    title: 'Nuvyrec — Screen Recorder',
     debugShowCheckedModeBanner: false,
     theme: frameTheme(Brightness.light),
     darkTheme: frameTheme(Brightness.dark),

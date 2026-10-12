@@ -2,7 +2,7 @@
 
 Research date: 2026-10-10. The research tables below describe the target product.
 The implementation status is recorded separately here and in release-status.md.
-Priorities are recommendations for Frame's lightweight recorder focus.
+Priorities are recommendations for Nuvyrec's lightweight recorder focus.
 
 ## Current implementation status
 
@@ -10,7 +10,7 @@ Priorities are recommendations for Frame's lightweight recorder focus.
 |---|---|
 | Hotkeys/tray, drag region, countdown | Implemented; native compilation/startup checked; drag interaction needs manual testing |
 | Audio endpoints, gain/mute, meters, mix | Implemented; actual three-track capture and DSP verified |
-| Quality presets, schedules, auto-stop | Implemented; schedules require Frame open; duration stop verified |
+| Quality presets, schedules, auto-stop | Implemented; schedules require Nuvyrec open; duration stop verified |
 | Library, screenshots, remux, trim/crop | Implemented; synthetic export/probe/decode tests passed |
 | Share/export presets | Implemented; landscape, vertical, square, small-file MP4; audio-track selection and bounded video threading |
 | Replay history | Implemented; bounded encoded-packet history, MKV save, keyframe/timestamp tests |
@@ -23,6 +23,7 @@ Priorities are recommendations for Frame's lightweight recorder focus.
 | Live visual scenes and transitions | Implemented; twenty scenes on one capture source, atomic takes, Cut / Fade through black and live webcam placement; multiple capture sources pending |
 | RTMP/RTMPS multistream and reconnect | Implemented Windows alpha; real platform validation pending |
 | GitHub release notifications | Implemented; daily idle checks, Stable/Beta, Later/Skip and browser downloads; automatic installation pending |
+| Windows Setup.exe | Implemented per-user installer, shortcuts and uninstall; local lifecycle smoke passed; signing and clean-machine QA pending |
 | SRT, platform account integrations, automatic captions/smart zoom | Pending |
 | Adaptive quality | Implemented for segmented MKV; measured overload reduces quality without increasing resources |
 | HEVC/AV1/HDR | Pending |
@@ -88,12 +89,12 @@ cursor effects, noise removal and transcription/captions.
 
 Replay buffer and scenes are described by [OBS](https://obsproject.com/kb/OBS-Studio-Overview).
 Captions are described by [Camtasia](https://www.techsmith.com/camtasia/features/).
-The remaining items are Frame architecture/product recommendations.
+The remaining items are Nuvyrec architecture/product recommendations.
 
 ## Implemented appearance setting
 
 Dark and Light themes are selectable in Settings → Appearance. The workspace,
 settings cards, text, borders and controls adapt together. Windows stores the
-selection per user at `HKCU\Software\FrameScreenRecorder\Theme`; it is restored
+selection per user at `HKCU\Software\NuvyrecScreenRecorder\Theme`; it is restored
 at startup. Changing appearance does not restart or reconfigure a recording.
 The capture preview keeps a dark image backdrop in both themes.

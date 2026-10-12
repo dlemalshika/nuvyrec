@@ -1,6 +1,6 @@
 # Live visual scenes
 
-Run `artifacts/Frame-Windows-Scenes/Frame.exe` with its whole bundle intact.
+Run `artifacts/Nuvyrec-Windows-Scenes/Nuvyrec.exe` with its whole bundle intact.
 
 1. Choose the screen, window or region and a new recording file as usual.
 2. Open **Scenes & live overlays** beside the capture-source controls. Enable

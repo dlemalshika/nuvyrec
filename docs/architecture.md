@@ -41,7 +41,7 @@ screenrecorder/
 │   │   ├── src/
 │   │   │   ├── lib.rs
 │   │   │   ├── error.rs
-│   │   │   ├── frame.rs               CPU AVFrame ownership
+│   │   │   ├── frame.rs               CPU AVNuvyrec ownership
 │   │   │   ├── output.rs              Seekable file IO callbacks
 │   │   │   ├── session.rs             Encoder + muxer lifecycle
 │   │   │   ├── capture/               [P] capture traits and source negotiation
@@ -143,7 +143,7 @@ flowchart LR
 
 `dart:ffi` calls a small C ABI exported by Rust `cdylib` on desktop/Android and
 `staticlib` on iOS. Expose fixed-width integers, versioned structs with a size
-field, and opaque numeric session IDs. Do not expose Rust types or `AVFrame*`.
+field, and opaque numeric session IDs. Do not expose Rust types or `AVNuvyrec*`.
 Generate larger bindings from the checked-in C header using ffigen; the current
 one-function binding is handwritten. Flutter's current guidance describes native
 build hooks for FFI packaging; the Rust build still needs explicit integration.
@@ -172,7 +172,7 @@ thread without changing the engine.
 Use MethodChannel/Pigeon messages for OS consent, source pickers, lifecycle and
 service/extension coordination, and an EventChannel for permission revocation.
 Respect platform thread rules. Native adapters invoke Rust through JNI on Android
-and the C ABI on Apple platforms. Frames remain native. Previews use Flutter's
+and the C ABI on Apple platforms. Nuvyrecs remain native. Previews use Flutter's
 texture registrar; ownership and renderer compatibility may require an extra GPU
 copy, but must not trigger a full-frame Dart/CPU pixel round trip.
 See [platform channels](https://docs.flutter.dev/platform-integration/platform-channels).
@@ -247,7 +247,7 @@ is an explicit fallback with disclosed capture/conversion costs.
 
 Do not assume enabling an FFmpeg hardware encoder by name establishes a GPU
 pipeline. The later backend layer must configure AVHWDeviceContext,
-AVHWFramesContext or equivalent native encoder resources, import the right
+AVHWNuvyrecsContext or equivalent native encoder resources, import the right
 surface type, and validate the entire capture-to-encoder path.
 
 ## Low-end and high-end performance policy

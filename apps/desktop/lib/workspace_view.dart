@@ -143,14 +143,17 @@ class RecorderWorkspace extends StatelessWidget {
               Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(10),
+                    padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(
                       color: colors.accent.withValues(alpha: .12),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(
-                      Icons.radio_button_checked,
-                      color: colors.accent,
+                    child: Image.asset(
+                      'assets/branding/nuvyrec-logo.png',
+                      width: 32,
+                      height: 32,
+                      cacheWidth: 128,
+                      semanticLabel: 'Nuvyrec logo',
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -158,7 +161,7 @@ class RecorderWorkspace extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'FRAME',
+                        'NUVYREC',
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.w800,
@@ -233,7 +236,7 @@ class RecorderWorkspace extends StatelessWidget {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Scheduled: ${recorder.scheduledAt!.toLocal()} · keep Frame open',
+                          'Scheduled: ${recorder.scheduledAt!.toLocal()} · keep Nuvyrec open',
                         ),
                       ),
                       TextButton(

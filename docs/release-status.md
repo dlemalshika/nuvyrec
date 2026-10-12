@@ -1,9 +1,16 @@
-# Frame — Windows capture alpha
+# Nuvyrec — Windows capture alpha
 
 This is a runnable Windows screen recorder, not the completed four-platform
 OBS/Bandicam competitor requested in the original specification.
 
 ## Implemented
+
+- Per-user Windows Setup.exe packaging with bundled runtimes, Start Menu and
+  optional Desktop shortcuts, stable upgrade identity and uninstall. Local
+  integration verifies the installed bundle hashes, installed app startup,
+  same-version reinstall, in-use executable refusal and uninstall. The installer
+  is unsigned; clean-machine and different-version upgrade QA remain required.
+  See [Windows installer](windows-installer.md).
 
 - GitHub update checker in Windows 0.3.0: public repository settings, Stable/Beta
   channels, daily idle checks, version-aware notifications, cached metadata,
@@ -154,7 +161,7 @@ OBS/Bandicam competitor requested in the original specification.
 - Native Flutter Windows release compilation and recording-control UI tests.
 - Packaged-release AVI region capture, pause/resume, and two decoded audio tracks.
 - Packaged executable rendered its first Flutter frame and exited cleanly using
-  `Frame.exe --smoke-test`.
+  `Nuvyrec.exe --smoke-test`.
 - Native PNG thumbnail capture and Flutter startup using `--preview-smoke-test`.
 - Separate-settings interactions, selected FPS in start configuration, region
   preview coordinates, preview-off suspension and layout at 960 × 640.
@@ -187,7 +194,7 @@ OBS/Bandicam competitor requested in the original specification.
 
 NVENC/AMF paths could not allocate NV12 textures on this machine; the software
 fallback worked and Quick Sync subsequently recorded using CPU-side conversion.
-This does not validate the NVENC/AMF hardware paths on other GPUs. Frame loss was
+This does not validate the NVENC/AMF hardware paths on other GPUs. Nuvyrec loss was
 observed in short smoke tests; sustained real-time throughput is not guaranteed.
 
 ## Required work before the original specification is complete
@@ -196,7 +203,7 @@ observed in short smoke tests; sustained real-time throughput is not guaranteed.
 - Android MediaProjection service and iOS ReplayKit broadcast-extension apps.
 - Multiple-source scene switching, crossfades and full Studio Mode. Live visual
   text/logo edits are available through the opt-in scene panel; annotation
-  drawing still takes place inside Frame's preview.
+  drawing still takes place inside Nuvyrec's preview.
 - Accurate discontinuity/drift correction and long-duration synchronization,
   fault-injection and power-loss recovery tests.
 - Zero-CPU-readback Quick Sync interop and validation on actual NVENC/AMF devices.

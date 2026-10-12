@@ -1,12 +1,12 @@
 [CmdletBinding()]
 param(
-    [ValidatePattern('^Frame-Windows(?:-[A-Za-z0-9]+)*$')]
-    [string]$BundleName = 'Frame-Windows-Updates'
+    [ValidatePattern('^Nuvyrec-Windows(?:-[A-Za-z0-9]+)*$')]
+    [string]$BundleName = 'Nuvyrec-Windows-Release'
 )
 $ErrorActionPreference = 'Stop'
 $releaseWorkspace = Split-Path -Parent $PSScriptRoot
 $releaseBundle = Join-Path $releaseWorkspace "artifacts\$BundleName"
-$releaseExe = Join-Path $releaseBundle 'Frame.exe'
+$releaseExe = Join-Path $releaseBundle 'Nuvyrec.exe'
 if (-not (Test-Path -LiteralPath $releaseExe -PathType Leaf)) { throw 'Package the Windows bundle first.' }
 # Use the executable version: --build-name overrides may differ from pubspec.
 $releaseVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($releaseExe).ProductVersion
@@ -27,7 +27,7 @@ foreach ($releaseFile in $releaseManifest) {
 }
 $releaseOutput = Join-Path $releaseWorkspace 'artifacts\github-release'
 New-Item -ItemType Directory -Path $releaseOutput -Force | Out-Null
-$releaseArchive = Join-Path $releaseOutput "Frame-Windows-x64-v$releaseTag.zip"
+$releaseArchive = Join-Path $releaseOutput "Nuvyrec-Windows-x64-v$releaseTag.zip"
 if (Test-Path -LiteralPath $releaseArchive) { throw 'Archive already exists. Use a new version; do not replace published releases.' }
 # The complete folder includes FFmpeg, Flutter assets and licensing notices.
 Compress-Archive -LiteralPath $releaseBundle -DestinationPath $releaseArchive -CompressionLevel Optimal

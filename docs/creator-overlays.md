@@ -49,7 +49,7 @@ simultaneous screens/cameras and transitions between capture sources remain work
 
 ## Repeatable integration check
 
-`Frame.exe --creator-smoke-test <absolute-output-directory>` launches a dedicated
+`Nuvyrec.exe --creator-smoke-test <absolute-output-directory>` launches a dedicated
 synthetic red/blue Flutter window, without reading or writing user preferences.
 It renders a Sinhala title and transparent logo, uploads their actual pixels
 through the C ABI, records only its own static window and auto-stops after three
@@ -57,7 +57,7 @@ seconds. It writes test metadata/PNG/RGBA fixtures locally, then exits. It does
 not activate other applications, move the pointer or poll shortcuts.
 
 ```powershell
-python tools/verify_creator_fixture.py --bundle artifacts/Frame-Windows-Creator artifacts/<fixture-directory>
+python tools/verify_creator_fixture.py --bundle artifacts/Nuvyrec-Windows-Creator artifacts/<fixture-directory>
 ```
 
 The verifier compares encoded glyph/alpha pixels against the uploaded assets

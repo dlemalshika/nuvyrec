@@ -195,7 +195,13 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(previewCalls.single['id'], 1);
-      expect(find.byType(Image), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget is Image && widget.image is MemoryImage,
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('NUVYREC'), findsOneWidget);
       expect(find.text('Maximum resolution'), findsNothing);
       await tester.runAsync(() async {
         final image =

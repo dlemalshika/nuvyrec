@@ -79,7 +79,7 @@ timeout. Such a camera thread retains its own resources instead of blocking
 recording finalization. A process-wide lease prevents opening another camera
 worker until the old one exits; this bounds the number of retained camera threads
 to one. In that case a later webcam recording reports that the camera is still
-closing. Restarting Frame may be necessary for a broken driver.
+closing. Restarting Nuvyrec may be necessary for a broken driver.
 
 The UI enumerates devices on a background Dart isolate, with one request in
 flight. Camera discovery and recording require a driver recognized by DirectShow.

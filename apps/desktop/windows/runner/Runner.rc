@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "org.screenrecorder" "\0"
-            VALUE "FileDescription", "Frame Screen Recorder" "\0"
+            VALUE "CompanyName", "Nuvyrec contributors" "\0"
+            VALUE "FileDescription", "Nuvyrec Screen Recorder" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "Frame" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 org.screenrecorder. All rights reserved." "\0"
-            VALUE "OriginalFilename", "Frame.exe" "\0"
-            VALUE "ProductName", "Frame" "\0"
+            VALUE "InternalName", "Nuvyrec" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Nuvyrec contributors." "\0"
+            VALUE "OriginalFilename", "Nuvyrec.exe" "\0"
+            VALUE "ProductName", "Nuvyrec" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

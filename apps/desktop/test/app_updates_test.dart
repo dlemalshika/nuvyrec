@@ -13,14 +13,34 @@ AppRelease release(String tag, {bool beta = false, bool draft = false}) =>
         'prerelease': beta,
         'body': 'New features',
         'assets': [
-          {'name': 'Frame-Windows-x64.zip', 'state': 'uploaded'},
+          {'name': 'Nuvyrec-Windows-x64.zip', 'state': 'uploaded'},
         ],
       },
-      'dlemalshika/screenrecorder',
+      'dlemalshika/nuvyrec',
       true,
     )!;
 
 void main() {
+  test('retired repository migrates without retaining stale release state', () {
+    final updates = UpdateController()..currentVersion = '0.3.1';
+    expect(updates.repository, 'dlemalshika/nuvyrec');
+    updates.restore({
+      'repository': 'dlemalshika/screenrecorder',
+      'automatic': false,
+      'skipped': 'v0.4.0',
+      'last_check': '2026-10-10T00:00:00Z',
+      'release': release('v0.4.0').toJson(),
+    });
+    expect(updates.repository, 'dlemalshika/nuvyrec');
+    expect(updates.automatic, false);
+    expect(updates.available, isNull);
+    expect(updates.lastCheck, isNull);
+    expect(updates.skipped, isNull);
+    updates.restore({'repository': 'another/project'});
+    expect(updates.repository, 'another/project');
+    updates.dispose();
+  });
+
   test(
     'SemVer precedence covers numeric tags, prereleases, textual minus and build metadata',
     () {
@@ -74,10 +94,8 @@ void main() {
     'repository validation rejects credentials, arbitrary hosts and path injection',
     () {
       expect(
-        normalizeRepository(
-          'https://github.com/dlemalshika/screenrecorder.git',
-        ),
-        'dlemalshika/screenrecorder',
+        normalizeRepository('https://github.com/dlemalshika/nuvyrec.git'),
+        'dlemalshika/nuvyrec',
       );
       for (final invalid in [
         'https://evil.test/a/b',
@@ -260,7 +278,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(
           opened,
-          'https://github.com/dlemalshika/screenrecorder/releases/tag/v0.4.0',
+          'https://github.com/dlemalshika/nuvyrec/releases/tag/v0.4.0',
         );
         await tester.pumpWidget(const SizedBox());
         updates.dispose();

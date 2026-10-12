@@ -1,6 +1,6 @@
 # Performance and PC compatibility
 
-Frame adapts recording work to available resources. These are conservative
+Nuvyrec adapts recording work to available resources. These are conservative
 budgets, not benchmark-derived promises that every PC can record smoothly.
 The current implementation is Windows only.
 
@@ -59,7 +59,7 @@ FPS at 24, resolution at 480p, then FPS at 15. Each step reduces bitrate in
 proportion to pixel rate, with a 500 kbps floor that never raises the prior
 bitrate. Already smaller/slower settings remain smaller/slower.
 
-Before changing encoder dimensions/FPS/bitrate, Frame finalizes the current MKV
+Before changing encoder dimensions/FPS/bitrate, Nuvyrec finalizes the current MKV
 and starts `-part0002.mkv`, etc. The library lists each completed part separately.
 Parts can have different dimensions and small timing gaps. Replay history resets
 at each boundary. Up to 1024 parts are allowed. The active part is not guaranteed

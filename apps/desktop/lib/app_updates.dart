@@ -86,7 +86,7 @@ String normalizeRepository(String input) {
       ).hasMatch(value) ||
       ['.', '..'].contains(value.split('/').last)) {
     throw const FormatException(
-      'Use owner/repository, for example dlemalshika/screenrecorder.',
+      'Use owner/repository, for example dlemalshika/nuvyrec.',
     );
   }
   return value;
@@ -121,7 +121,7 @@ class AppRelease {
               final name = a['name'];
               return name is String &&
                   RegExp(
-                    r'^Frame-Windows[^/\\]*\.(zip|exe|msi)$',
+                    r'^(?:Nuvyrec|Frame)-Windows[^/\\]*\.(zip|exe|msi)$',
                     caseSensitive: false,
                   ).hasMatch(name) &&
                   a['state'] == 'uploaded';
@@ -153,7 +153,10 @@ Future<AppRelease?> fetchGitHubRelease(String repository, bool beta) async {
       );
       final request = await client.getUrl(uri);
       request.followRedirects = false;
-      request.headers.set(HttpHeaders.userAgentHeader, 'Frame-Update-Checker');
+      request.headers.set(
+        HttpHeaders.userAgentHeader,
+        'Nuvyrec-Update-Checker',
+      );
       request.headers.set(
         HttpHeaders.acceptHeader,
         'application/vnd.github+json',
@@ -213,7 +216,7 @@ class UpdateController extends ChangeNotifier {
   final DateTime Function() _clock;
   String repository = const String.fromEnvironment(
     'FRAME_UPDATE_REPOSITORY',
-    defaultValue: 'dlemalshika/screenrecorder',
+    defaultValue: 'dlemalshika/nuvyrec',
   );
   String? currentVersion, error, message, skipped;
   bool automatic = true, beta = false, checking = false, _disposed = false;
@@ -230,17 +233,27 @@ class UpdateController extends ChangeNotifier {
       _clock().difference(lastCheck!) >= const Duration(days: 1);
 
   void restore(Map data) {
+    var migratedRepository = false;
     try {
       if (data['repository'] is String) {
-        repository = normalizeRepository(data['repository']);
+        final savedRepository = normalizeRepository(data['repository']);
+        // Move the retired development source; preserve other custom sources.
+        migratedRepository = savedRepository == 'dlemalshika/screenrecorder';
+        if (!migratedRepository) repository = savedRepository;
       }
     } catch (_) {}
     automatic = data['automatic'] != false;
     beta = data['beta'] == true;
-    skipped = data['skipped'] is String ? data['skipped'] : null;
-    lastCheck = DateTime.tryParse(data['last_check']?.toString() ?? '');
-    deferredUntil = DateTime.tryParse(data['deferred_until']?.toString() ?? '');
-    final saved = data['release'];
+    skipped = !migratedRepository && data['skipped'] is String
+        ? data['skipped']
+        : null;
+    lastCheck = migratedRepository
+        ? null
+        : DateTime.tryParse(data['last_check']?.toString() ?? '');
+    deferredUntil = migratedRepository
+        ? null
+        : DateTime.tryParse(data['deferred_until']?.toString() ?? '');
+    final saved = migratedRepository ? null : data['release'];
     final current = AppVersion.parse(currentVersion ?? '');
     if (saved is Map && current != null) {
       final release = AppRelease.fromJson(saved, repository, beta);

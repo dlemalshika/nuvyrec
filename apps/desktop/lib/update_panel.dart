@@ -75,7 +75,7 @@ class _UpdatePanelState extends State<UpdatePanel> {
             contentPadding: EdgeInsets.zero,
             title: const Text('Automatic update checks'),
             subtitle: const Text(
-              'Check once a day while Frame is open and idle. No account or token needed.',
+              'Check once a day while Nuvyrec is open and idle. No account or token needed.',
             ),
             value: updates.automatic,
             onChanged: updates.checking ? null : (v) => configure(auto: v),
@@ -179,7 +179,7 @@ class _UpdatePanelState extends State<UpdatePanel> {
           ],
           const SizedBox(height: 8),
           const Text(
-            'Downloads open in your browser. Stop recording and exit Frame before replacing its bundle. This version does not install updates or restart automatically.',
+            'Downloads open in your browser. Stop recording and exit Nuvyrec before replacing its bundle. This version does not install updates or restart automatically.',
           ),
         ],
       );

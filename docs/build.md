@@ -31,7 +31,7 @@ The environment helper uses project-local Rust, libclang and FFmpeg paths and
 disables incremental compilation to avoid restricted-filesystem hard-link issues.
 Run Flutter commands with access to its SDK cache and native build tools. The
 packaging script builds the Rust library and Flutter executable, then creates
-`artifacts/Frame-Windows` including all required runtime DLLs and assets.
+`artifacts/Nuvyrec-Windows` including all required runtime DLLs and assets.
 
 On another machine install Rust stable, Flutter and Visual Studio's desktop C++
 workload. Prepare the SDK layout below or adjust tools/native-env.ps1 to your
@@ -82,7 +82,7 @@ It renders `artifacts/desktop-ui.png`, `artifacts/desktop-ui-light.png` and
 `artifacts/desktop-settings.png` using a generated preview fixture, not real
 desktop content.
 
-`Frame.exe --preview-smoke-test` checks a native desktop thumbnail is a PNG,
+`Nuvyrec.exe --preview-smoke-test` checks a native desktop thumbnail is a PNG,
 renders the first Flutter frame and exits. Run it from the packaged folder with
 desktop access. The ordinary `--smoke-test` checks only the first-frame startup.
 

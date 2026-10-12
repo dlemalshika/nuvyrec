@@ -1,12 +1,17 @@
-# Frame — native screen recorder
+# Nuvyrec — native screen recorder
 
-Frame is a working **Windows capture alpha** with a Rust/FFmpeg engine and a native
+![Nuvyrec logo](apps/desktop/assets/branding/nuvyrec-logo.png)
+
+Project repository: [dlemalshika/nuvyrec](https://github.com/dlemalshika/nuvyrec).
+See [branding and release setup](docs/branding.md) for the Nuvyrec 1.0.0 first release.
+
+Nuvyrec is a working **Windows capture alpha** with a Rust/FFmpeg engine and a native
 Flutter desktop interface. The original four-platform professional specification
 is still in progress; see [release status](docs/release-status.md) for exact gaps.
 
 ## Run the local Windows build
 
-Open the latest build at `artifacts/Frame-Windows-Updates/Frame.exe`. Keep the entire folder together: Flutter
+Open the latest build at `artifacts/Nuvyrec-Windows-Release/Nuvyrec.exe`. Keep the entire folder together: Flutter
 assets, recorder_core.dll and the matching FFmpeg runtime DLLs are required.
 Choose a display, window or display region, choose a new output file, then record.
 The main workspace shows a live thumbnail preview. Open **Settings** for video,
@@ -31,6 +36,8 @@ See [live streaming](docs/live-streaming.md) for YouTube/Facebook/TikTok setup,
 shared encoding, upload requirements and account-specific limits.
 See [GitHub updates](docs/updates.md) for daily checks, Stable/Beta channels,
 update notifications and preparing a versioned release ZIP.
+See [Windows installation](docs/windows-installer.md) for Setup.exe packaging,
+Start Menu/Desktop shortcuts, upgrades and uninstall.
 See [live scenes](docs/scenes.md) for saved visual layouts, atomic live editing,
 webcam placement and Cut / Fade-through-black transitions on one capture source.
 
@@ -88,8 +95,8 @@ See [build instructions](docs/build.md). On the prepared local workspace:
 ./tools/package-windows.ps1
 ```
 
-Packaging defaults to `artifacts/Frame-Windows`. To recreate the feature build
-alongside an open app, use `./tools/package-windows.ps1 -BundleName Frame-Windows-Multistream`.
+Packaging defaults to `artifacts/Nuvyrec-Windows`. To recreate the feature build
+alongside an open app, use `./tools/package-windows.ps1 -BundleName Nuvyrec-Windows-Multistream`.
 
 The original [architecture plan](docs/architecture.md) explains the target
 monorepo, media ownership and future platform integrations. The current code adds

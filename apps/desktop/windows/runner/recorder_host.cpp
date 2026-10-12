@@ -154,7 +154,7 @@ void RegisterRecorderHost(flutter::BinaryMessenger* messenger, HWND owner, bool 
         icon.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP; icon.uCallbackMessage = kTrayMessage;
         icon.hIcon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(101));
         if (!icon.hIcon) icon.hIcon = LoadIconW(nullptr,IDI_APPLICATION);
-        wcscpy_s(icon.szTip,L"Frame screen recorder");
+        wcscpy_s(icon.szTip,L"Nuvyrec screen recorder");
         tray_added = Shell_NotifyIconW(NIM_ADD,&icon) != FALSE;
       }
       result->Success(flutter::EncodableValue(conflicts));
@@ -277,7 +277,7 @@ bool HandleRecorderHostMessage(HWND owner, UINT message, WPARAM wparam, LPARAM l
     if (lparam == WM_LBUTTONDBLCLK) { ShowWindow(owner,SW_RESTORE); SetForegroundWindow(owner); }
     if (lparam == WM_RBUTTONUP) {
       auto menu = CreatePopupMenu();
-      AppendMenuW(menu,MF_STRING,801,L"Show Frame");
+      AppendMenuW(menu,MF_STRING,801,L"Show Nuvyrec");
       AppendMenuW(menu,MF_STRING,802,L"Start / stop recording\tCtrl+Shift+F9");
       AppendMenuW(menu,MF_STRING,803,L"Pause / resume\tCtrl+Shift+F10");
       AppendMenuW(menu,MF_STRING,804,L"Save replay\tCtrl+Shift+F11");
