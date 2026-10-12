@@ -3,6 +3,8 @@
 ![Nuvyrec logo](apps/desktop/assets/branding/nuvyrec-logo.png)
 
 Project repository: [dlemalshika/nuvyrec](https://github.com/dlemalshika/nuvyrec).
+See the [Code signing policy](docs/code-signing-policy.md) and [Privacy policy](docs/privacy.md).
+SignPath integration is being prepared; existing installers remain unsigned.
 See [branding and release setup](docs/branding.md) for the Nuvyrec 1.0.0 first release.
 
 Nuvyrec is a working **Windows capture alpha** with a Rust/FFmpeg engine and a native

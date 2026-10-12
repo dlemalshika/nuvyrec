@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Import into SignPath, then configure trusted GitHub origin and manual approval. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters><parameter name="version" required="true" /></parameters>
+  <zip-file>
+    <pe-file path="Nuvyrec.exe" product-name="Nuvyrec" product-version="${version}" original-filename="Nuvyrec.exe">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="recorder_core.dll" product-name="Nuvyrec" product-version="${version}" original-filename="recorder_core.dll">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

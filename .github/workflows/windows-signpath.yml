@@ -1,0 +1,151 @@
+name: Windows build and SignPath signing
+
+on:
+  workflow_dispatch:
+    inputs:
+      sign:
+        description: 'Request signing (requires Foundation approval and configured credentials)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: windows-signpath-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    if: github.repository == 'dlemalshika/nuvyrec' && github.ref == 'refs/heads/main'
+    runs-on: windows-2025
+    timeout-minutes: 180
+    environment: code-signing
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Validate signing configuration without printing secrets
+        if: inputs.sign
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_POLICY_SLUG: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          SIGNPATH_PAYLOAD_CONFIG: ${{ vars.SIGNPATH_PAYLOAD_CONFIG }}
+          SIGNPATH_INSTALLER_CONFIG: ${{ vars.SIGNPATH_INSTALLER_CONFIG }}
+          SIGNPATH_CERTIFICATE_THUMBPRINT: ${{ vars.SIGNPATH_CERTIFICATE_THUMBPRINT }}
+        run: |
+          foreach ($name in @('SIGNPATH_API_TOKEN','SIGNPATH_ORGANIZATION_ID','SIGNPATH_PROJECT_SLUG','SIGNPATH_POLICY_SLUG','SIGNPATH_PAYLOAD_CONFIG','SIGNPATH_INSTALLER_CONFIG','SIGNPATH_CERTIFICATE_THUMBPRINT')) {
+            if (-not [Environment]::GetEnvironmentVariable($name)) { throw "Missing configuration: $name" }
+          }
+      - name: Bootstrap pinned source and dependencies
+        run: ./tools/setup-windows-ci.ps1
+      - name: Build and validate from checked-out source
+        id: build
+        run: |
+          . ./tools/native-env.ps1
+          cargo test --workspace --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Native tests failed.' }
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          if ($LASTEXITCODE -ne 0) { throw 'Native analysis failed.' }
+          cargo build --release --locked -p recorder-ffi
+          if ($LASTEXITCODE -ne 0) { throw 'Native build failed.' }
+          Push-Location apps/desktop
+          try {
+            flutter pub get
+            if ($LASTEXITCODE -ne 0) { throw 'Flutter dependencies failed.' }
+            flutter analyze --no-pub
+            if ($LASTEXITCODE -ne 0) { throw 'Flutter analysis failed.' }
+            flutter test --no-pub
+            if ($LASTEXITCODE -ne 0) { throw 'Flutter tests failed.' }
+            flutter build windows --release --no-pub
+            if ($LASTEXITCODE -ne 0) { throw 'Flutter build failed.' }
+          } finally { Pop-Location }
+          ./tools/package-windows.ps1 -SkipBuild -BundleName Nuvyrec-Windows-CI
+          $version = [Diagnostics.FileVersionInfo]::GetVersionInfo("$PWD/artifacts/Nuvyrec-Windows-CI/Nuvyrec.exe").ProductVersion
+          $coreVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo("$PWD/artifacts/Nuvyrec-Windows-CI/recorder_core.dll").ProductVersion
+          if ($coreVersion -ne $version) { throw 'App and DLL versions differ.' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - name: Upload project-owned unsigned payload
+        if: inputs.sign
+        id: payload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unsigned-project-payload
+          if-no-files-found: error
+          path: |
+            artifacts/Nuvyrec-Windows-CI/Nuvyrec.exe
+            artifacts/Nuvyrec-Windows-CI/recorder_core.dll
+      - name: Request payload signatures with manual SignPath approval
+        if: inputs.sign
+        uses: SignPath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_PAYLOAD_CONFIG }}
+          github-artifact-id: ${{ steps.payload.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: artifacts/signed-payload
+          parameters: |
+            version: ${{ toJSON(steps.build.outputs.version) }}
+      - name: Verify payload and refresh its manifest
+        if: inputs.sign
+        env:
+          CERTIFICATE_THUMBPRINT: ${{ vars.SIGNPATH_CERTIFICATE_THUMBPRINT }}
+        run: ./tools/accept-signed-artifacts.ps1 -Stage Payload -SignedDirectory artifacts/signed-payload -CertificateThumbprint $env:CERTIFICATE_THUMBPRINT
+      - name: Package installer and portable archive
+        run: |
+          ./tools/build-windows-installer.ps1 -BundleName Nuvyrec-Windows-CI
+          ./tools/prepare-github-release.ps1 -BundleName Nuvyrec-Windows-CI
+      - name: Upload installer signing input
+        if: inputs.sign
+        id: installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unsigned-installer
+          if-no-files-found: error
+          path: artifacts/github-release/*-Setup.exe
+      - name: Request installer signature with manual SignPath approval
+        if: inputs.sign
+        uses: SignPath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_INSTALLER_CONFIG }}
+          github-artifact-id: ${{ steps.installer.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: artifacts/signed-installer
+          parameters: |
+            version: ${{ toJSON(steps.build.outputs.version) }}
+      - name: Verify installer and publish only verified output as a workflow artifact
+        if: inputs.sign
+        env:
+          CERTIFICATE_THUMBPRINT: ${{ vars.SIGNPATH_CERTIFICATE_THUMBPRINT }}
+        run: |
+          ./tools/accept-signed-artifacts.ps1 -Stage Installer -SignedDirectory artifacts/signed-installer -CertificateThumbprint $env:CERTIFICATE_THUMBPRINT
+          Copy-Item artifacts/github-release/*.zip,artifacts/github-release/*.zip.sha256 -Destination artifacts/signed-release
+      - name: Signed release files (no automatic GitHub release publishing)
+        if: inputs.sign
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verified-signed-release
+          if-no-files-found: error
+          path: artifacts/signed-release/*
+      - name: Unsigned build files for initial CI verification
+        if: ${{ !inputs.sign }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unsigned-release-do-not-label-signed
+          if-no-files-found: error
+          path: artifacts/github-release/*

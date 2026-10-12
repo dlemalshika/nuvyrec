@@ -2,7 +2,9 @@
 param(
     [ValidatePattern('^Nuvyrec-Windows(?:-[A-Za-z0-9]+)*$')]
     [string]$BundleName = 'Nuvyrec-Windows-Release',
-    [string]$CompilerPath
+    [string]$CompilerPath,
+    [ValidatePattern('^[A-Za-z0-9-]+$')]
+    [string]$OutputFolder = 'github-release'
 )
 $ErrorActionPreference = 'Stop'
 $installerRoot = Split-Path -Parent $PSScriptRoot
@@ -48,11 +50,13 @@ if (-not $CompilerPath) {
 if (-not $CompilerPath -or -not (Test-Path -LiteralPath $CompilerPath -PathType Leaf)) {
     throw 'Install Inno Setup 6.3+ from https://jrsoftware.org/isdl.php or supply -CompilerPath.'
 }
-$installerOutput = Join-Path $installerRoot 'artifacts\github-release'
+$installerOutput = Join-Path $installerRoot "artifacts\$OutputFolder"
 New-Item -ItemType Directory -Path $installerOutput -Force | Out-Null
 $installerAsset = Join-Path $installerOutput "Nuvyrec-Windows-x64-v$installerTag-Setup.exe"
 if (Test-Path -LiteralPath $installerAsset) { throw 'Installer already exists; use a new version or a different validated release bundle.' }
-& $CompilerPath "/DBundleDir=$installerBundle" "/DReleaseVersion=$installerTag" "/DOutputDir=$installerOutput" (Join-Path $installerRoot 'packaging\windows\frame.iss')
+$installerInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($installerExe)
+$installerBinaryVersion = "$($installerInfo.FileMajorPart).$($installerInfo.FileMinorPart).$($installerInfo.FileBuildPart).$($installerInfo.FilePrivatePart)"
+& $CompilerPath "/DBundleDir=$installerBundle" "/DReleaseVersion=$installerTag" "/DFullVersion=$installerVersion" "/DBinaryVersion=$installerBinaryVersion" "/DOutputDir=$installerOutput" (Join-Path $installerRoot 'packaging\windows\frame.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Installer compiler failed.' }
 $installerDigest = (Get-FileHash -LiteralPath $installerAsset -Algorithm SHA256).Hash.ToLowerInvariant()
 "$installerDigest  $([System.IO.Path]::GetFileName($installerAsset))" | Set-Content -LiteralPath "$installerAsset.sha256" -Encoding ascii

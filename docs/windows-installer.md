@@ -1,5 +1,8 @@
 # Windows installer
 
+For future signed releases, see [SignPath setup](signpath-setup.md) and the
+[Code signing policy](code-signing-policy.md). Account approval is pending.
+
 The per-user Windows installer includes the complete native app, Flutter assets,
 Rust engine and FFmpeg runtime. End users need no development tools. The current
 build targets x64-compatible Windows 10 1903+ and Windows 11; other platform

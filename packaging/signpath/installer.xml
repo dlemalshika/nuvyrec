@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters><parameter name="version" required="true" /></parameters>
+  <zip-file>
+    <pe-file path="Nuvyrec-Windows-x64-v*-Setup.exe" product-name="Nuvyrec" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

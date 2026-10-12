@@ -8,12 +8,23 @@
 #ifndef OutputDir
   #error OutputDir must be provided
 #endif
+#ifndef FullVersion
+  #error FullVersion must be provided
+#endif
+#ifndef BinaryVersion
+  #error BinaryVersion must be provided
+#endif
 
 [Setup]
 ; Keep this ID stable across upgrades, including application display-name changes.
 AppId={{7CFD2025-7177-4616-AE47-46BD74DA390A}
 AppName=Nuvyrec
 AppVersion={#ReleaseVersion}
+VersionInfoVersion={#BinaryVersion}
+VersionInfoProductName=Nuvyrec
+VersionInfoProductVersion={#BinaryVersion}
+VersionInfoProductTextVersion={#FullVersion}
+VersionInfoTextVersion={#FullVersion}
 AppPublisher=Nuvyrec contributors
 DefaultDirName={localappdata}\Programs\Nuvyrec
 DefaultGroupName=Nuvyrec

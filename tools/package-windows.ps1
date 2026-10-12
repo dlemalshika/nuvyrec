@@ -37,6 +37,18 @@ try {
     Copy-Item -Path "$env:FFMPEG_DIR\bin\*.dll" -Destination $bundleRoot -Force
     Copy-Item -LiteralPath "$env:FFMPEG_DIR\bin\ffmpeg.exe","$env:FFMPEG_DIR\bin\ffprobe.exe" -Destination $bundleRoot -Force
     $runtimeRoot = 'C:\Program Files\Microsoft Visual Studio\18\Community\VC\Redist\MSVC\14.51.36231\x64\Microsoft.VC145.CRT'
+    if (-not (Test-Path -LiteralPath $runtimeRoot)) {
+        $vsLocator = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+        if (Test-Path -LiteralPath $vsLocator) {
+            $vsInstall = & $vsLocator -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+            if ($vsInstall) {
+                $runtimeCandidate = Get-ChildItem -Path (Join-Path $vsInstall 'VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT') -Directory |
+                    Sort-Object FullName -Descending | Select-Object -First 1
+                if ($runtimeCandidate) { $runtimeRoot = $runtimeCandidate.FullName }
+            }
+        }
+    }
+    if (-not (Test-Path -LiteralPath $runtimeRoot)) { throw 'Cannot locate Visual C++ runtime libraries.' }
     if (Test-Path -LiteralPath $runtimeRoot) {
         Copy-Item -Path (Join-Path $runtimeRoot '*.dll') -Destination $bundleRoot -Force
     }
